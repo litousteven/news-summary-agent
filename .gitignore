@@ -1,0 +1,23 @@
+# Binaries
+news_summary
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Environment
+.env
+
+# Data files (runtime generated)
+data/push_history.jsonl
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Logs
+*.log
+*.log.*
