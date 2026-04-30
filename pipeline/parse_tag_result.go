@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -19,7 +19,6 @@ type tagResultItem struct {
 	Category      string          `json:"category"`
 	TopicTags     json.RawMessage `json:"topic_tags"`
 	Region        string          `json:"region"`
-	EventKey      string          `json:"event_key"`
 	InterestScore json.RawMessage `json:"interest_score"`
 	IsDuplicate   json.RawMessage `json:"is_duplicate"`
 	Selected      json.RawMessage `json:"selected"`
@@ -27,6 +26,8 @@ type tagResultItem struct {
 }
 
 // parseTagResult parses the LLM output JSON into structured TaggedNewsItems.
+// It uses PipelineState to access RawItems from FetchRSS and merges raw fields
+// (Source, Title, Summary, Link, etc.) back into each tagged item.
 func (p *NewsPipeline) parseTagResult(ctx context.Context, msg *schema.Message) ([]TaggedNewsItem, error) {
 	content := msg.Content
 
@@ -51,7 +52,19 @@ func (p *NewsPipeline) parseTagResult(ctx context.Context, msg *schema.Message) 
 		return nil, fmt.Errorf("failed to parse LLM tag output as JSON: %w", err)
 	}
 
-	// Build tagged items from parsed results
+	// Build index of raw items by ID for merging
+	rawByID := make(map[string]RawNewsItem)
+	// Also build title-to-raw index for fallback matching
+	rawByTitle := make(map[string]RawNewsItem)
+	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+		for _, raw := range state.RawItems {
+			rawByID[raw.ID] = raw
+			rawByTitle[raw.Title] = raw
+		}
+		return nil
+	})
+
+	// Build tagged items from parsed results, merging raw fields
 	tagged := make([]TaggedNewsItem, 0, len(results))
 	for _, r := range results {
 		item := TaggedNewsItem{
@@ -62,16 +75,20 @@ func (p *NewsPipeline) parseTagResult(ctx context.Context, msg *schema.Message) 
 			Category:      normalizeCategory(r.Category),
 			TopicTags:     parseTopicTags(r.TopicTags),
 			Region:        r.Region,
-			EventKey:      r.EventKey,
 			InterestScore: parseInterestScore(r.InterestScore),
 			IsDuplicate:   parseBool(r.IsDuplicate, false),
 			Selected:      parseBool(r.Selected, false),
 			WhySelected:   r.WhySelected,
 		}
 
-		// Auto-generate event_key if missing
-		if item.EventKey == "" {
-			item.EventKey = generateEventKey(item.ID, item.Category)
+		// Merge raw fields from the original RawNewsItem
+		// Try ID match first, then title match as fallback
+		if raw, ok := rawByID[r.ID]; ok {
+			item.RawNewsItem = raw
+		} else if raw, ok := rawByTitle[r.DisplayTitle]; ok {
+			item.RawNewsItem = raw
+		} else if raw, ok := rawByTitle[r.ID]; ok {
+			item.RawNewsItem = raw
 		}
 
 		// Default display_title to title if empty
@@ -200,25 +217,6 @@ func normalizeScore(score int) int {
 		return 10
 	}
 	return score
-}
-
-// generateEventKey creates a fallback event_key from ID and category.
-func generateEventKey(id, category string) string {
-	now := time.Now().Format("2006-01-02")
-	slug := slugify(id)
-	return fmt.Sprintf("%s-%s", now, slug)
-}
-
-var nonAlphaNumRe = regexp.MustCompile(`[^a-z0-9\p{Han}]+`)
-
-func slugify(s string) string {
-	s = strings.ToLower(s)
-	s = nonAlphaNumRe.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if len(s) > 40 {
-		s = s[:40]
-	}
-	return s
 }
 
 // extractJSONFromMarkdown tries to extract JSON from ```json ... ``` blocks.

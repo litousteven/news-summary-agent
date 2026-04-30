@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
 // recordHistory appends pushed items to push_history.jsonl and returns the final result.
+// It uses PipelineState to access DigestItems for per-item record writing with embeddings,
+// which enables semantic dedup on subsequent runs.
 func (p *NewsPipeline) recordHistory(ctx context.Context, msg *schema.Message) (*NewsSummaryResult, error) {
 	summaryText := msg.Content
 
@@ -22,31 +26,57 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, msg *schema.Message) (
 		},
 	}
 
-	// Record a single session entry to push_history.jsonl
-	now := time.Now().UTC().Format(time.RFC3339)
-	record := PushHistoryRecord{
-		PushTime:     now,
-		Slot:         getSlotLabel(),
-		EventKey:     fmt.Sprintf("digest-%s", time.Now().Format("2006-01-02-150405")),
-		DisplayTitle: fmt.Sprintf("国际新闻简报 %s", getSlotLabel()),
-		Category:     "简报",
-		Source:       "多源",
-		PublishedAt:  now,
-		FactSummary:  truncateForHistory(summaryText),
-	}
+	// Retrieve DigestItems, Slot, and Stats from shared state
+	var digestItems []DigestItem
+	var slot string
+	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+		digestItems = state.DigestItems
+		slot = state.Slot
+		// Copy stats from digest if available
+		if state.DigestStats != nil {
+			result.Stats = *state.DigestStats
+		}
+		result.DigestItems = digestItems
+		return nil
+	})
 
-	if err := p.appendHistoryRecord(record); err != nil {
-		return nil, fmt.Errorf("append history: %w", err)
+	// Write per-item records with embeddings for dedup on next run
+	if len(digestItems) > 0 {
+		if err := p.RecordHistoryFromDigest(ctx, digestItems, slot); err != nil {
+			log.Printf("[RecordHistory] 写入逐条历史记录失败: %v", err)
+			// Non-fatal: still return the result
+		}
+	} else {
+		// Fallback: write a single session-level record if no digest items available
+		slotLabel := slotToLabel(slot)
+		now := time.Now().Format(time.RFC3339)
+		record := PushHistoryRecord{
+			PushTime:     now,
+			Slot:         slot,
+			DisplayTitle: fmt.Sprintf("国际新闻简报 %s", slotLabel),
+			Category:     "简报",
+			Source:       "多源",
+			PublishedAt:  now,
+			FactSummary:  truncateForHistory(summaryText),
+		}
+		if err := p.appendHistoryRecord(record); err != nil {
+			return nil, fmt.Errorf("append history: %w", err)
+		}
 	}
 
 	return result, nil
 }
 
-// RecordHistoryFromDigest appends individual item records to push_history.jsonl.
+// historyFilePath returns the per-day history file path for the given date.
+func (p *NewsPipeline) historyFilePath(t time.Time) string {
+	return p.DataDir + "/push_history_" + t.Format("20060102") + ".jsonl"
+}
+
+// RecordHistoryFromDigest appends individual item records to today's history file.
 // Computes embeddings for each item if Embedding client is available.
 func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []DigestItem, slot string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	path := p.DataDir + "/push_history.jsonl"
+	now := time.Now()
+	path := p.historyFilePath(now)
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -67,11 +97,11 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []Dige
 		}
 	}
 
+	nowStr := now.Format(time.RFC3339)
 	for i, item := range items {
 		record := PushHistoryRecord{
-			PushTime:     now,
+			PushTime:     nowStr,
 			Slot:         slot,
-			EventKey:     item.EventKey,
 			DisplayTitle: item.DisplayTitle,
 			Category:     item.Category,
 			Source:       item.Source,
@@ -95,9 +125,9 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []Dige
 	return nil
 }
 
-// appendHistoryRecord appends a single record to push_history.jsonl.
+// appendHistoryRecord appends a single record to today's history file.
 func (p *NewsPipeline) appendHistoryRecord(record PushHistoryRecord) error {
-	path := p.DataDir + "/push_history.jsonl"
+	path := p.historyFilePath(time.Now())
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {

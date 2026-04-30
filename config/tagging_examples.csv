@@ -1,0 +1,11 @@
+title,display_title,category,topic_tags,region,interest_score,is_duplicate,selected,why_selected
+伊朗袭击迪拜附近油轮，地区战事持续升级,伊朗袭击迪拜附近油轮，地区战事持续升级,战争与地缘,"伊朗,迪拜,油轮,中东",中东,9,false,true,中东冲突升级且与能源运输相关
+Kuwaiti Tanker Full of Oil Struck Off Dubai Day After Trump's Threats,特朗普发出威胁次日满载原油的科威特油轮在迪拜附近遭袭,战争与地缘,"迪拜,油轮,中东,能源",中东,8,true,false,与主事件重复报道
+美以袭击致霍尔木兹海峡一海水淡化厂受损,美以袭击致霍尔木兹海峡海水淡化厂受损,战争与地缘,"霍尔木兹,中东,袭击",中东,9,false,true,地区冲突核心事件
+针对美可能发动地面战 伊朗武装部队：将斩断侵略者的腿,伊朗就美方可能发动地面战发出强硬威胁,战争与地缘,"伊朗,地面战,中东",中东,9,false,true,地缘升级信号明显
+SpaceX launches next-generation Starlink satellites,SpaceX 发射新一代 Starlink 卫星,航空航天,"SpaceX,卫星,火箭,航天",北美,10,false,true,高度符合用户航天兴趣
+Japan deploys long-range missiles in Kumamoto and Shizuoka,日本在熊本和静冈部署远程导弹,军事装备,"日本,导弹,部署,防务",东亚,9,false,true,典型军事部署新闻
+Eurovision Song Contest launches first-ever Asia edition,欧洲歌唱大赛将首次推出亚洲版本,其他重要动态,"文化,国际活动",欧洲,2,false,false,与用户核心兴趣弱相关
+China bans storing cremated remains in empty bone ash apartments,中国禁止将骨灰存放在空置骨灰房中,其他重要动态,"社会,中国",东亚,2,false,false,不属于AI与数码 也非核心兴趣
+New EV battery plant announced in Europe,欧洲宣布建设新的电动车电池工厂,新能源与汽车,"电池,电动车,欧洲,制造业",欧洲,8,false,true,符合新能源汽车兴趣
+Nvidia unveils new AI chip architecture,英伟达发布新一代 AI 芯片架构,AI与数码,"AI,芯片,Nvidia,半导体",北美,10,false,true,高度符合 AI/数码兴趣

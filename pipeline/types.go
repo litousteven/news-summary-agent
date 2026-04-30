@@ -1,8 +1,4 @@
 package pipeline
-
-import "time"
-
-// NewsSummaryRequest is the input to the pipeline.
 type NewsSummaryRequest struct {
 	Slot string // "00:00" / "12:00" / "18:00"
 }
@@ -26,7 +22,6 @@ type TaggedNewsItem struct {
 	Category      string   `json:"category"`
 	TopicTags     []string `json:"topic_tags"`
 	Region        string   `json:"region"`
-	EventKey      string   `json:"event_key"`
 	InterestScore int      `json:"interest_score"`
 	IsDuplicate   bool     `json:"is_duplicate"`
 	Selected      bool     `json:"selected"`
@@ -75,7 +70,6 @@ type DigestStats struct {
 type PushHistoryRecord struct {
 	PushTime     string `json:"push_time"`
 	Slot         string `json:"slot"`
-	EventKey     string `json:"event_key"`
 	DisplayTitle string `json:"display_title"`
 	Category     string `json:"category"`
 	Source       string `json:"source"`
@@ -88,44 +82,35 @@ type PushHistoryRecord struct {
 
 // NewsSummaryResult is the final output of the pipeline.
 type NewsSummaryResult struct {
-	Message string      `json:"message"`
-	Stats   DigestStats `json:"stats"`
+	Message     string        `json:"message"`
+	Stats       DigestStats   `json:"stats"`
+	DigestItems []DigestItem  `json:"digest_items,omitempty"`
 }
 
 // PipelineState is the shared state flowing through all graph nodes.
+// Used via compose.WithGenLocalState to allow downstream nodes to access
+// data produced by earlier nodes that is not passed through the linear edge.
 type PipelineState struct {
-	// Input
-	Request *NewsSummaryRequest
-
-	// Stage 1: FetchRSS
+	// Set by FetchRSS, consumed by ParseTagResult to merge raw fields
 	RawItems []RawNewsItem
 
-	// Stage 2: EmbedAndCluster
-	Embeddings [][]float64
-	Clusters   []NewsCluster
+	// Set by BuildDigest, consumed by RecordHistory to write per-item records
+	DigestItems []DigestItem
 
-	// Stage 3: TagNews
-	TaggedItems []TaggedNewsItem
+	// Set by BuildDigest, consumed by RecordHistory to populate result stats
+	DigestStats *DigestStats
 
-	// Stage 4: MergeHistory
-	MergedItems []MergedNewsItem
-
-	// Stage 5: BuildDigest
-	Digest *DigestData
-
-	// Stage 6: Summarize
-	SummaryText string
-
-	// Stage 7: RecordHistory
-	Result *NewsSummaryResult
+	// The slot from the original request
+	Slot string
 }
 
 // RSS feed configuration
 type FeedSource struct {
-	Name     string
-	URL      string
-	Lang     string
-	UseProxy bool
+	Name     string `yaml:"name" json:"name"`
+	URL      string `yaml:"url" json:"url"`
+	Lang     string `yaml:"lang" json:"lang"`
+	UseProxy bool   `yaml:"use_proxy" json:"use_proxy"`
+	Enabled  bool   `yaml:"enabled" json:"enabled"`
 }
 
 // Categories and their priority order
@@ -156,21 +141,40 @@ var SourceRank = map[string]int{
 	"Al Jazeera":  4,
 }
 
-// Default RSS feeds
+// Default RSS feeds (used when feeds.yaml is not found)
+// Only Enabled=true feeds are active.
 var DefaultFeeds = []FeedSource{
-	{Name: "中新网", URL: "https://www.chinanews.com.cn/rss/world.xml", Lang: "zh", UseProxy: false},
-	{Name: "BBC", URL: "https://feeds.bbci.co.uk/news/world/rss.xml", Lang: "en", UseProxy: true},
-	{Name: "NPR", URL: "https://feeds.npr.org/1004/rss.xml", Lang: "en", UseProxy: true},
-	{Name: "NYT", URL: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", Lang: "en", UseProxy: true},
-	{Name: "Al Jazeera", URL: "https://www.aljazeera.com/xml/rss/all.xml", Lang: "en", UseProxy: true},
+	{Name: "中新网", URL: "https://www.chinanews.com.cn/rss/world.xml", Lang: "zh", Enabled: true},
+	{Name: "BBC", URL: "https://feeds.bbci.co.uk/news/world/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
+	{Name: "NPR", URL: "https://feeds.npr.org/1004/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
+	{Name: "NYT", URL: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", Lang: "en", UseProxy: true, Enabled: true},
+	{Name: "联合早报", URL: "https://www.zaobao.com.sg/rss/news.xml", Lang: "zh", Enabled: true},
+	// Candidate sources (disabled by default)
+	{Name: "香港电台", URL: "https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml", Lang: "zh"},
+	{Name: "CNN", URL: "http://rss.cnn.com/rss/edition.rss", Lang: "en"},
+	{Name: "Washington Post", URL: "https://feeds.washingtonpost.com/rss/world", Lang: "en", UseProxy: true},
+	{Name: "NBC News", URL: "https://feeds.nbcnews.com/nbcnews/public/news", Lang: "en", UseProxy: true},
+	{Name: "ABC News", URL: "https://abcnews.go.com/abcnews/topstories", Lang: "en", UseProxy: true},
+	{Name: "FOX News", URL: "https://moxie.foxnews.com/google-publisher/world.xml", Lang: "en", UseProxy: true},
+	{Name: "The Guardian", URL: "https://www.theguardian.com/world/rss", Lang: "en", UseProxy: true},
+	{Name: "Financial Times", URL: "https://www.ft.com/rss/home", Lang: "en", UseProxy: true},
+	{Name: "The Independent", URL: "https://www.independent.co.uk/rss", Lang: "en", UseProxy: true},
+	{Name: "Sky News", URL: "https://feeds.skynews.com/feeds/rss/world.xml", Lang: "en", UseProxy: true},
+	{Name: "France24", URL: "https://www.france24.com/en/rss", Lang: "en", UseProxy: true},
+	{Name: "DW", URL: "https://rss.dw.com/rdf/rss-en-all", Lang: "en", UseProxy: true},
+	{Name: "Japan Times", URL: "https://www.japantimes.co.jp/feed/", Lang: "en", UseProxy: true},
 }
 
-// Constants
+// Default constants (used when PipelineConfig fields are zero)
 const (
-	MaxItemsPerFeed  = 10
-	MaxTotalItems    = 50
-	MaxDigestItems   = 10
-	MaxPerCategory   = 3
-	ClusterThreshold = 0.85
-	HistoryLookback  = 24 * time.Hour
+	DefaultMaxItemsPerFeed  = 10
+	DefaultMaxTotalItems    = 50
+	DefaultMaxDigestItems   = 10
+	DefaultMaxPerCategory   = 3
+	DefaultClusterThreshold = 0.75
+	DefaultFileExpiryDays  = 2
+
+	// SeenBeforePushThreshold is the minimum InterestScore for a seen-before
+	// item to still enter the digest as a follow-up (with prior context).
+	SeenBeforePushThreshold = 8
 )

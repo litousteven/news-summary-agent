@@ -18,13 +18,12 @@ const tagSystemPrompt = `你是一名国际新闻标注专家。你的任务是�
 ## 标注规则
 
 1. 输出 JSON 数组，每个元素对应一条新闻
-2. 必填字段：id, display_title, category, topic_tags, region, event_key, interest_score, is_duplicate, selected, why_selected
+2. 必填字段：id, display_title, category, topic_tags, region, interest_score, is_duplicate, selected, why_selected
 3. category 枚举值限定 7 个：战争与地缘 / 航空航天 / 军事装备 / AI与数码 / 新能源与汽车 / 全球经济 / 其他重要动态
-4. 同事件必须共用 event_key
-5. event_key 格式：YYYY-MM-DD-slug-description（如 2026-04-20-us-seizes-iran-ship）
-6. is_duplicate=true 的条目通常 selected=false
-7. display_title 是给用户看的标题，英文标题翻成自然中文
-8. interest_score 范围 0-10
+4. 同一事件的不同报道，display_title 应尽量保持一致，便于后续去重
+5. is_duplicate=true 的条目通常 selected=false
+6. display_title 是给用户看的标题，英文标题翻成自然中文
+7. interest_score 范围 0-10
 
 ## 分类边界
 
@@ -50,7 +49,7 @@ const tagSystemPrompt = `你是一名国际新闻标注专家。你的任务是�
 多条新闻描述同一事件时：
 - 选一条主项：is_duplicate=false, selected=true
 - 其他重复项：is_duplicate=true, selected=false
-- 所有重复项共用同一个 event_key
+- 同一事件的不同报道，display_title 应尽量保持一致
 - 主项优先原则：中文标题更清晰、信息更完整、来源更稳
 
 ## 标注规范
@@ -68,7 +67,7 @@ const tagUserPrompt = `请标注以下 {total_count} 条新闻，输出 JSON 数
 要求：
 1. 严格按照 JSON 数组格式输出，不要输出其他内容
 2. 每个元素必须包含所有必填字段
-3. 同事件的不同报道必须使用相同的 event_key`
+3. 同一事件的不同报道，display_title 应尽量保持一致`
 
 // newSummaryChatTemplate creates the ChatTemplate for the summarization stage.
 func (p *NewsPipeline) newSummaryChatTemplate() (prompt.ChatTemplate, error) {
