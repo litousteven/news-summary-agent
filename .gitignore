@@ -1,4 +1,5 @@
 # Binaries
+news-summary-agent
 news_summary
 *.exe
 *.dll
@@ -11,7 +12,8 @@ news_summary
 .env
 
 # Data files (runtime generated)
-data/push_history.jsonl
+data/*.jsonl
+data/*.md
 
 # IDE
 .idea/

@@ -19,13 +19,14 @@ func (p *NewsPipeline) formatSummaryPrompt(ctx context.Context, digest *DigestDa
 			currentCat = item.Category
 			contentBuilder.WriteString(fmt.Sprintf("## %s\n", currentCat))
 		}
-		contentBuilder.WriteString(fmt.Sprintf("- %s\n", item.FactParagraph))
 		if item.SeenBefore {
-			contentBuilder.WriteString(fmt.Sprintf("  (前情：%s)\n", item.LastFactSummary))
+			contentBuilder.WriteString(fmt.Sprintf("- [追踪更新] %s\n", item.FactParagraph))
+		} else {
+			contentBuilder.WriteString(fmt.Sprintf("- %s\n", item.FactParagraph))
 		}
 	}
 
-	// Build history section for items that need follow-up context
+	// Build history section for seen-before items that have prior context
 	var historyBuilder strings.Builder
 	hasHistory := false
 	for _, item := range digest.Items {

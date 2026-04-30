@@ -8,26 +8,39 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/mmcdole/gofeed"
+	"gopkg.in/yaml.v3"
 )
 
 // fetchRSS fetches RSS feeds from configured sources and returns structured news items.
 func (p *NewsPipeline) fetchRSS(ctx context.Context, req *NewsSummaryRequest) ([]RawNewsItem, error) {
+	// Save slot into shared state for downstream nodes (especially RecordHistory)
+	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+		state.Slot = req.Slot
+		return nil
+	})
+
 	var items []RawNewsItem
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	for _, feed := range DefaultFeeds {
+	// Load feeds: try feeds.yaml first, fall back to DefaultFeeds
+	feeds := p.loadFeeds()
+
+	for _, feed := range feeds {
 		fetched, err := p.fetchFeed(ctx, feed)
 		if err != nil {
 			log.Printf("[FetchRSS] feed=%s err=%v", feed.Name, err)
 			continue
 		}
 		for i, item := range fetched {
-			if i >= MaxItemsPerFeed {
+			if i >= p.GetMaxItemsPerFeed() {
 				break
 			}
 			summary := cleanHTML(item.Description)
@@ -42,11 +55,11 @@ func (p *NewsPipeline) fetchRSS(ctx context.Context, req *NewsSummaryRequest) ([
 				Lang:        feed.Lang,
 				FetchedAt:   now,
 			})
-			if len(items) >= MaxTotalItems {
+			if len(items) >= p.GetMaxTotalItems() {
 				break
 			}
 		}
-		if len(items) >= MaxTotalItems {
+		if len(items) >= p.GetMaxTotalItems() {
 			break
 		}
 		log.Printf("[FetchRSS] source=%s count=%d", feed.Name, len(fetched))
@@ -57,6 +70,48 @@ func (p *NewsPipeline) fetchRSS(ctx context.Context, req *NewsSummaryRequest) ([
 	}
 
 	return items, nil
+}
+
+// loadFeeds loads RSS feed sources from config/feeds.yaml if it exists,
+// otherwise falls back to DefaultFeeds. Only returns enabled feeds.
+func (p *NewsPipeline) loadFeeds() []FeedSource {
+	allFeeds := DefaultFeeds
+
+	if p.ConfigDir != "" {
+		path := filepath.Join(p.ConfigDir, "feeds.yaml")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("[loadFeeds] 读取 %s 失败: %v，使用默认源", path, err)
+			}
+		} else {
+			var feeds []FeedSource
+			if err := yaml.Unmarshal(data, &feeds); err != nil {
+				log.Printf("[loadFeeds] 解析 %s 失败: %v，使用默认源", path, err)
+			} else if len(feeds) > 0 {
+				allFeeds = feeds
+				log.Printf("[loadFeeds] 从 %s 加载了 %d 个RSS源", path, len(feeds))
+			} else {
+				log.Printf("[loadFeeds] %s 为空，使用默认源", path)
+			}
+		}
+	}
+
+	// Filter to only enabled feeds
+	var enabled []FeedSource
+	for _, f := range allFeeds {
+		if f.Enabled {
+			enabled = append(enabled, f)
+		}
+	}
+
+	if len(enabled) == 0 {
+		log.Printf("[loadFeeds] 无启用的RSS源，使用默认源")
+		return DefaultFeeds
+	}
+
+	log.Printf("[loadFeeds] 启用的RSS源: %d/%d", len(enabled), len(allFeeds))
+	return enabled
 }
 
 // fetchFeed fetches and parses a single RSS feed.
@@ -109,7 +164,6 @@ func cleanHTML(s string) string {
 	s = htmlTagRe.ReplaceAllString(s, "")
 	s = html.UnescapeString(s)
 	s = strings.TrimSpace(s)
-	// collapse whitespace
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	s = whitespaceRe.ReplaceAllString(s, " ")
 	return s
 }

@@ -1,0 +1,120 @@
+# RSS 新闻源配置
+# 修改此文件后无需重新编译，下次运行自动生效
+# 字段说明:
+#   name: 来源名称（显示用）
+#   url: RSS 订阅地址
+#   lang: 语言标识 zh/en
+#   use_proxy: 是否需要代理访问
+#   enabled: 是否启用（true/false），关闭后不会被抓取
+
+# ===== 默认启用的核心源 =====
+
+- name: 中新网
+  url: https://www.chinanews.com.cn/rss/world.xml
+  lang: zh
+  use_proxy: false
+  enabled: true
+
+- name: BBC
+  url: https://feeds.bbci.co.uk/news/world/rss.xml
+  lang: en
+  use_proxy: true
+  enabled: true
+
+- name: NPR
+  url: https://feeds.npr.org/1004/rss.xml
+  lang: en
+  use_proxy: true
+  enabled: true
+
+- name: NYT
+  url: https://rss.nytimes.com/services/xml/rss/nyt/World.xml
+  lang: en
+  use_proxy: true
+  enabled: true
+
+- name: 联合早报
+  url: https://www.zaobao.com.sg/rss/news.xml
+  lang: zh
+  use_proxy: false
+  enabled: true
+
+# ===== 候选源（默认关闭，按需启用） =====
+
+- name: 香港电台
+  url: https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml
+  lang: zh
+  use_proxy: false
+  enabled: false
+
+- name: CNN
+  url: http://rss.cnn.com/rss/edition.rss
+  lang: en
+  use_proxy: false
+  enabled: false
+
+- name: Washington Post
+  url: https://feeds.washingtonpost.com/rss/world
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: NBC News
+  url: https://feeds.nbcnews.com/nbcnews/public/news
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: ABC News
+  url: https://abcnews.go.com/abcnews/topstories
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: FOX News
+  url: https://moxie.foxnews.com/google-publisher/world.xml
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: The Guardian
+  url: https://www.theguardian.com/world/rss
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: Financial Times
+  url: https://www.ft.com/rss/home
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: The Independent
+  url: https://www.independent.co.uk/rss
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: Sky News
+  url: https://feeds.skynews.com/feeds/rss/world.xml
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: France24
+  url: https://www.france24.com/en/rss
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: DW
+  url: https://rss.dw.com/rdf/rss-en-all
+  lang: en
+  use_proxy: true
+  enabled: false
+
+- name: Japan Times
+  url: https://www.japantimes.co.jp/feed/
+  lang: en
+  use_proxy: true
+  enabled: false

@@ -1,0 +1,20 @@
+# 新闻简报 Agent 配置文件
+# 修改此文件后无需重新编译，下次运行自动生效
+
+# 每个RSS源最大抓取条目数
+max_items_per_feed: 10
+
+# 总共最大抓取条目数
+max_total_items: 50
+
+# 简报最大入选条目数
+max_digest_items: 10
+
+# 每个分类最大条目数
+max_per_category: 3
+
+# 语义去重相似度阈值 (0.0~1.0，越低越容易判为重复)
+cluster_threshold: 0.75
+
+# data 目录文件过期天数（超过此天数的 push_history/tagged_cache/digest 文件将被清理）
+file_expiry_days: 2
