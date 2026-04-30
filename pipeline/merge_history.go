@@ -33,7 +33,6 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 		for i, item := range items {
 			result[i] = MergedNewsItem{
 				TaggedNewsItem: item,
-				ShouldPush:     true,
 			}
 		}
 		return result, nil
@@ -110,7 +109,6 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 	for i, item := range items {
 		result[i] = MergedNewsItem{
 			TaggedNewsItem: item,
-			ShouldPush:     true,
 		}
 
 		// 1. Exact link match (highest priority, most reliable)
@@ -118,12 +116,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 		if link != "" {
 			if prev, ok := historyByLink[link]; ok {
 				result[i].SeenBefore = true
-				result[i].LastPushTime = prev.PushTime
-				result[i].LastFactSummary = prev.FactSummary
-				result[i].HistoryNote = fmt.Sprintf("链接完全匹配，时间：%s", prev.PushTime)
-				if item.InterestScore < SeenBeforePushThreshold {
-					result[i].ShouldPush = false
-				}
+				result[i].HistoryNote = fmt.Sprintf("链接完全匹配，上次推送：%s", prev.PushTime)
 				continue
 			}
 		}
@@ -132,12 +125,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 		title := strings.TrimSpace(item.DisplayTitle)
 		if prev, ok := historyByTitle[title]; ok {
 			result[i].SeenBefore = true
-			result[i].LastPushTime = prev.PushTime
-			result[i].LastFactSummary = prev.FactSummary
-			result[i].HistoryNote = fmt.Sprintf("标题完全匹配，时间：%s", prev.PushTime)
-			if item.InterestScore < SeenBeforePushThreshold {
-				result[i].ShouldPush = false
-			}
+			result[i].HistoryNote = fmt.Sprintf("标题完全匹配，上次推送：%s", prev.PushTime)
 			continue
 		}
 
@@ -168,56 +156,69 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 	// Second pass: LLM verification for embedding candidates
 	if len(llmCandidates) > 0 && p.ChatModel != nil {
 		// Batch verify: group candidates to minimize LLM calls
-		verified, err := p.llmVerifyDuplicates(ctx, items, result, llmCandidates)
+		verified, err := p.llmVerifyDuplicates(ctx, items, llmCandidates)
 		if err != nil {
 			log.Printf("[MergeHistory] LLM核查失败: %v，回退到embedding直接判重", err)
-			// Fallback: trust embedding similarity
+			// Fallback: trust embedding similarity → all treated as duplicates
 			for _, c := range llmCandidates {
 				result[c.itemIdx].SeenBefore = true
-				result[c.itemIdx].LastPushTime = c.record.PushTime
-				result[c.itemIdx].LastFactSummary = c.record.FactSummary
-				result[c.itemIdx].HistoryNote = fmt.Sprintf("语义相似推送(%.2f)，时间：%s", c.sim, c.record.PushTime)
-				if result[c.itemIdx].InterestScore < SeenBeforePushThreshold {
-					result[c.itemIdx].ShouldPush = false
-				}
+				result[c.itemIdx].HistoryNote = fmt.Sprintf("语义相似推送(%.2f)，上次推送：%s", c.sim, c.record.PushTime)
 			}
 		} else {
-			for idx, isDup := range verified {
+			for idx, vr := range verified {
 				c := llmCandidates[idx]
-				if isDup {
+				if vr.IsDuplicate {
 					result[c.itemIdx].SeenBefore = true
-					result[c.itemIdx].LastPushTime = c.record.PushTime
-					result[c.itemIdx].LastFactSummary = c.record.FactSummary
-					result[c.itemIdx].HistoryNote = fmt.Sprintf("LLM确认重复(语义%.2f)，时间：%s", c.sim, c.record.PushTime)
-					if result[c.itemIdx].InterestScore < SeenBeforePushThreshold {
-						result[c.itemIdx].ShouldPush = false
+					result[c.itemIdx].HistoryNote = fmt.Sprintf("LLM确认重复(语义%.2f)，上次推送：%s", c.sim, c.record.PushTime)
+				} else if vr.IsReference {
+					// Related news with developments/reversal: not duplicate, attach as reference
+					ref := HistoryReference{
+						DisplayTitle: c.record.DisplayTitle,
+						Link:         c.record.Link,
+						PushTime:     c.record.PushTime,
+						FactSummary:  c.record.FactSummary,
+						RelationNote: vr.Note,
 					}
+					result[c.itemIdx].References = append(result[c.itemIdx].References, ref)
 				}
-				// If LLM says not duplicate, leave SeenBefore=false
+				// If neither duplicate nor reference (无关), do nothing
 			}
 		}
 	} else if len(llmCandidates) > 0 {
 		// No ChatModel available, fallback to embedding direct judgment
 		for _, c := range llmCandidates {
 			result[c.itemIdx].SeenBefore = true
-			result[c.itemIdx].LastPushTime = c.record.PushTime
-			result[c.itemIdx].LastFactSummary = c.record.FactSummary
-			result[c.itemIdx].HistoryNote = fmt.Sprintf("语义相似推送(%.2f)，时间：%s", c.sim, c.record.PushTime)
-			if result[c.itemIdx].InterestScore < SeenBeforePushThreshold {
-				result[c.itemIdx].ShouldPush = false
-			}
+			result[c.itemIdx].HistoryNote = fmt.Sprintf("语义相似推送(%.2f)，上次推送：%s", c.sim, c.record.PushTime)
+		}
+	}
+
+	// Cap references per item to max 2
+	for i := range result {
+		if len(result[i].References) > 2 {
+			result[i].References = result[i].References[:2]
 		}
 	}
 
 	return result, nil
 }
 
-// llmVerifyDuplicates uses LLM to verify if embedding-matched candidates are truly duplicates.
-// Returns a boolean slice where true means "is duplicate".
-func (p *NewsPipeline) llmVerifyDuplicates(ctx context.Context, items []TaggedNewsItem, result []MergedNewsItem, candidates []embedCandidate) ([]bool, error) {
+// verifyResult holds the LLM verification outcome for one candidate pair.
+type verifyResult struct {
+	IsDuplicate bool   // true = same event, skip the current item
+	IsReference bool   // true = related but has new developments/reversal
+	Note        string // e.g. "前情回顾" or "反转"
+}
+
+// llmVerifyDuplicates uses LLM to verify if embedding-matched candidates are truly duplicates,
+// and also identifies related news with further developments or reversals (references).
+func (p *NewsPipeline) llmVerifyDuplicates(ctx context.Context, items []TaggedNewsItem, candidates []embedCandidate) ([]verifyResult, error) {
 	// Build verification prompt
 	var sb strings.Builder
-	sb.WriteString("请判断以下新闻对是否描述的是同一个事件。对于每一对，回复 是 或 否。\n\n")
+	sb.WriteString("请判断以下新闻对的关系。对于每一对，回复以下三种之一：\n")
+	sb.WriteString("- 重复：两条新闻描述的是同一个事件，内容没有实质进展\n")
+	sb.WriteString("- 进展：两条新闻相关，但当前新闻有新的实质进展（如：事态升级、结果出炉、新增细节）\n")
+	sb.WriteString("- 反转：两条新闻相关，但当前新闻对之前的报道有实质反转\n")
+	sb.WriteString("- 无关：两条新闻不相关\n\n")
 
 	for idx, c := range candidates {
 		item := items[c.itemIdx]
@@ -227,10 +228,10 @@ func (p *NewsPipeline) llmVerifyDuplicates(ctx context.Context, items []TaggedNe
 		sb.WriteString(fmt.Sprintf("（向量相似度：%.2f）\n\n", c.sim))
 	}
 
-	sb.WriteString("请按顺序回复，每行一个 是 或 否。只回复是/否，不要其他内容。")
+	sb.WriteString("请按顺序回复，每行一个关键词：重复 / 进展 / 反转 / 无关。只回复关键词，不要其他内容。")
 
 	messages := []*schema.Message{
-		schema.SystemMessage("你是一名新闻去重核查员。判断两条新闻是否描述同一事件。只有核心事件相同时才回答 是。"),
+		schema.SystemMessage("你是一名新闻去重与关联核查员。判断两条新闻的关系。只有核心事件完全相同且无新进展时才回答 重复；有新的实质进展回答 进展；有实质反转回答 反转；不相关回答 无关。"),
 		schema.UserMessage(sb.String()),
 	}
 
@@ -239,9 +240,9 @@ func (p *NewsPipeline) llmVerifyDuplicates(ctx context.Context, items []TaggedNe
 		return nil, fmt.Errorf("LLM verify call: %w", err)
 	}
 
-	// Parse LLM response: extract 是/否 for each pair
+	// Parse LLM response: extract 重复/进展/反转/无关 for each pair
 	lines := strings.Split(resp.Content, "\n")
-	verified := make([]bool, len(candidates))
+	results := make([]verifyResult, len(candidates))
 	answerIdx := 0
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -251,21 +252,27 @@ func (p *NewsPipeline) llmVerifyDuplicates(ctx context.Context, items []TaggedNe
 		if answerIdx >= len(candidates) {
 			break
 		}
-		if strings.Contains(line, "是") && !strings.Contains(line, "否") {
-			verified[answerIdx] = true
+		if strings.Contains(line, "重复") && !strings.Contains(line, "进展") && !strings.Contains(line, "反转") {
+			results[answerIdx] = verifyResult{IsDuplicate: true}
 			answerIdx++
-		} else if strings.Contains(line, "否") {
-			verified[answerIdx] = false
+		} else if strings.Contains(line, "进展") {
+			results[answerIdx] = verifyResult{IsReference: true, Note: "前情回顾"}
+			answerIdx++
+		} else if strings.Contains(line, "反转") {
+			results[answerIdx] = verifyResult{IsReference: true, Note: "反转"}
+			answerIdx++
+		} else if strings.Contains(line, "无关") {
+			results[answerIdx] = verifyResult{}
 			answerIdx++
 		}
 	}
 
-	// If LLM didn't answer all, default to embedding judgment for remaining
+	// If LLM didn't answer all, default to embedding judgment (duplicate) for remaining
 	for i := answerIdx; i < len(candidates); i++ {
-		verified[i] = true // fallback: trust embedding
+		results[i] = verifyResult{IsDuplicate: true} // fallback: trust embedding
 	}
 
-	return verified, nil
+	return results, nil
 }
 
 // truncateForLLM truncates text for LLM prompt context.

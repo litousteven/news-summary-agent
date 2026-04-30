@@ -143,15 +143,19 @@ func writeDigestMD(dataDir string, result *pipeline.NewsSummaryResult) error {
 			currentCat = item.Category
 			b.WriteString(fmt.Sprintf("## %s\n\n", currentCat))
 		}
-		prefix := ""
-		if item.SeenBefore {
-			prefix = "[追踪更新] "
-		}
-		b.WriteString(fmt.Sprintf("- %s%s\n", prefix, item.FactParagraph))
+		b.WriteString(fmt.Sprintf("- %s\n", item.FactParagraph))
 		if item.Link != "" {
 			b.WriteString(fmt.Sprintf("  [%s](%s)\n", item.Source, item.Link))
 		} else {
 			b.WriteString(fmt.Sprintf("  来源: %s\n", item.Source))
+		}
+		// Render references as Markdown quotes
+		for _, ref := range item.References {
+			if ref.Link != "" {
+				b.WriteString(fmt.Sprintf("  > %s: [%s](%s)\n", ref.RelationNote, ref.DisplayTitle, ref.Link))
+			} else {
+				b.WriteString(fmt.Sprintf("  > %s: %s\n", ref.RelationNote, ref.DisplayTitle))
+			}
 		}
 	}
 

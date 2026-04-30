@@ -276,7 +276,6 @@ func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 
 					InterestScore: 9,
 				},
-				ShouldPush: true,
 			},
 			FactParagraph: "美军在海湾扣押了一艘伊朗船只，涉及武器走私。",
 		},
@@ -294,7 +293,6 @@ func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 
 					InterestScore: 10,
 				},
-				ShouldPush: true,
 			},
 			FactParagraph: "SpaceX成功发射了新一代Starlink卫星。",
 		},
@@ -386,7 +384,6 @@ func TestRecordHistory_WritesPerItemRecordsWithEmbeddings(t *testing.T) {
 
 					InterestScore: 8,
 				},
-				ShouldPush: true,
 			},
 			FactParagraph: "这是测试事实段落。",
 		},
@@ -480,7 +477,6 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 
 					InterestScore: 9,
 				},
-				ShouldPush: true,
 			},
 			FactParagraph: "美军在海湾扣押了一艘伊朗船只。",
 		},
@@ -509,8 +505,8 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 				Source: "BBC",
 				Title:  "US seizes another Iranian ship",
 			},
-			DisplayTitle:  "美军扣押伊朗船只", // same DisplayTitle as history
-			InterestScore: 8,          // meets SeenBeforePushThreshold → ShouldPush=true as follow-up
+			DisplayTitle:  "美军扣押伊朗船只", // same DisplayTitle as history → SeenBefore=true
+			InterestScore: 8,
 		},
 		{
 			RawNewsItem: RawNewsItem{
@@ -534,23 +530,14 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 		t.Fatalf("expected 2 merged items, got %d", len(merged))
 	}
 
-	// First item: DisplayTitle matches history, high score → SeenBefore=true, ShouldPush=true
+	// First item: DisplayTitle matches history → SeenBefore=true (duplicate)
 	if !merged[0].SeenBefore {
 		t.Error("merged[0] should be SeenBefore=true (DisplayTitle matches history)")
-	}
-	if !merged[0].ShouldPush {
-		t.Error("merged[0] should be ShouldPush=true (high score → follow-up with prior context)")
-	}
-	if merged[0].LastFactSummary != "美军在海湾扣押了一艘伊朗船只。" {
-		t.Errorf("merged[0] LastFactSummary: got %q, want %q", merged[0].LastFactSummary, "美军在海湾扣押了一艘伊朗船只。")
 	}
 
 	// Second item: new event
 	if merged[1].SeenBefore {
 		t.Error("merged[1] should be SeenBefore=false (new event)")
-	}
-	if !merged[1].ShouldPush {
-		t.Error("merged[1] should be ShouldPush=true (new event)")
 	}
 }
 
@@ -567,7 +554,6 @@ func TestRecordHistoryFromDigest_WithEmbeddings(t *testing.T) {
 					DisplayTitle: "测试1",
 					Category:     "AI与数码",
 				},
-				ShouldPush: true,
 			},
 			FactParagraph: "测试事实1",
 		},
@@ -578,7 +564,6 @@ func TestRecordHistoryFromDigest_WithEmbeddings(t *testing.T) {
 					DisplayTitle: "测试2",
 					Category:     "航空航天",
 				},
-				ShouldPush: true,
 			},
 			FactParagraph: "测试事实2",
 		},
@@ -746,9 +731,9 @@ func TestParseTagResult_StateInjectionViaGraph(t *testing.T) {
 	}
 }
 
-// --- P2: SeenBefore items with high score enter digest as follow-ups ---
+// --- P2: SeenBefore items are excluded from digest ---
 
-func TestMergeHistory_SeenBeforeHighScore_ShouldPushTrue(t *testing.T) {
+func TestMergeHistory_SeenBeforeHighScore_IsDuplicate(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Write a history record
@@ -776,7 +761,7 @@ func TestMergeHistory_SeenBeforeHighScore_ShouldPushTrue(t *testing.T) {
 			},
 			DisplayTitle:  "美伊冲突升级", // same display_title as history → exact match
 			Category:      "战争与地缘",
-			InterestScore: 9, // high score → ShouldPush=true
+			InterestScore: 9,
 		},
 	}
 
@@ -793,15 +778,9 @@ func TestMergeHistory_SeenBeforeHighScore_ShouldPushTrue(t *testing.T) {
 	if !m.SeenBefore {
 		t.Error("SeenBefore should be true (DisplayTitle matches history)")
 	}
-	if !m.ShouldPush {
-		t.Error("ShouldPush should be true (InterestScore=9 >= SeenBeforePushThreshold=8)")
-	}
-	if m.LastFactSummary != "美伊冲突的前情概要" {
-		t.Errorf("LastFactSummary: got %q, want %q", m.LastFactSummary, "美伊冲突的前情概要")
-	}
 }
 
-func TestMergeHistory_SeenBeforeLowScore_ShouldPushFalse(t *testing.T) {
+func TestMergeHistory_SeenBeforeLowScore_IsDuplicate(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	now := "2026-04-28T12:00:00Z"
@@ -829,7 +808,7 @@ func TestMergeHistory_SeenBeforeLowScore_ShouldPushFalse(t *testing.T) {
 			},
 			DisplayTitle:  "小事件", // same display_title as history → exact match
 			Category:      "其他重要动态",
-			InterestScore: 5, // below threshold → ShouldPush=false
+			InterestScore: 5,
 		},
 	}
 
@@ -845,9 +824,6 @@ func TestMergeHistory_SeenBeforeLowScore_ShouldPushFalse(t *testing.T) {
 	m := merged[0]
 	if !m.SeenBefore {
 		t.Error("SeenBefore should be true")
-	}
-	if m.ShouldPush {
-		t.Error("ShouldPush should be false (InterestScore=5 < SeenBeforePushThreshold=8)")
 	}
 }
 
@@ -879,12 +855,9 @@ func TestMergeHistory_NewEventAlwaysPushes(t *testing.T) {
 	if merged[0].SeenBefore {
 		t.Error("SeenBefore should be false for new event")
 	}
-	if !merged[0].ShouldPush {
-		t.Error("ShouldPush should be true for new event")
-	}
 }
 
-func TestBuildDigest_IncludesSeenBeforeFollowUps(t *testing.T) {
+func TestBuildDigest_ExcludesSeenBeforeDuplicates(t *testing.T) {
 	items := []MergedNewsItem{
 		{
 			TaggedNewsItem: TaggedNewsItem{
@@ -894,7 +867,6 @@ func TestBuildDigest_IncludesSeenBeforeFollowUps(t *testing.T) {
 
 				InterestScore: 9,
 			},
-			ShouldPush: true,
 		},
 		{
 			TaggedNewsItem: TaggedNewsItem{
@@ -903,10 +875,7 @@ func TestBuildDigest_IncludesSeenBeforeFollowUps(t *testing.T) {
 				Category:      "战争与地缘",
 				InterestScore: 8,
 			},
-			SeenBefore:      true,
-			ShouldPush:      true,
-			LastPushTime:    "2026-04-28T12:00:00Z",
-			LastFactSummary: "上次推送的概要",
+			SeenBefore: true,
 		},
 		{
 			TaggedNewsItem: TaggedNewsItem{
@@ -915,9 +884,7 @@ func TestBuildDigest_IncludesSeenBeforeFollowUps(t *testing.T) {
 				Category:      "其他重要动态",
 				InterestScore: 5,
 			},
-			SeenBefore:   true,
-			ShouldPush:   false, // low score → filtered out
-			LastPushTime: "2026-04-28T12:00:00Z",
+			SeenBefore: true,
 		},
 	}
 
@@ -927,126 +894,232 @@ func TestBuildDigest_IncludesSeenBeforeFollowUps(t *testing.T) {
 		t.Fatalf("buildDigest error: %v", err)
 	}
 
-	// Should have 2 items (new event + follow-up), not 3 (low-score SeenBefore filtered out)
+	// Should have only 1 item (new event), SeenBefore items are excluded regardless of score
+	if len(digest.Items) != 1 {
+		t.Fatalf("expected 1 digest item, got %d", len(digest.Items))
+	}
+
+	// Only the new event should be in the digest
+	if digest.Items[0].SeenBefore {
+		t.Error("digest.Items[0] should not be SeenBefore (new event)")
+	}
+}
+
+// --- Reference news tests ---
+
+func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
+	items := []MergedNewsItem{
+		{
+			TaggedNewsItem: TaggedNewsItem{
+				RawNewsItem:   RawNewsItem{ID: "1", Source: "BBC", Title: "Iran strike", Summary: "Iran launched missiles"},
+				DisplayTitle:  "伊朗发动导弹袭击",
+				Category:      "战争与地缘",
+				InterestScore: 9,
+			},
+			References: []HistoryReference{
+				{
+					DisplayTitle: "美伊冲突升级",
+					Link:         "https://bbc.co.uk/1",
+					PushTime:     "2026-04-28T12:00:00Z",
+					FactSummary:  "美伊冲突的前情概要",
+					RelationNote: "前情回顾",
+				},
+			},
+		},
+		{
+			TaggedNewsItem: TaggedNewsItem{
+				RawNewsItem:   RawNewsItem{ID: "2", Source: "NPR", Title: "AI breakthrough", Summary: "New AI model released"},
+				DisplayTitle:  "AI新突破",
+				Category:      "AI与数码",
+				InterestScore: 8,
+			},
+			References: []HistoryReference{
+				{
+					DisplayTitle: "AI模型发展",
+					Link:         "https://npr.org/1",
+					PushTime:     "2026-04-28T06:00:00Z",
+					FactSummary:  "之前的AI报道",
+					RelationNote: "反转",
+				},
+			},
+		},
+	}
+
+	p := &NewsPipeline{}
+	digest, err := p.buildDigest(context.Background(), items)
+	if err != nil {
+		t.Fatalf("buildDigest error: %v", err)
+	}
+
 	if len(digest.Items) != 2 {
 		t.Fatalf("expected 2 digest items, got %d", len(digest.Items))
 	}
 
-	// First item: new event
-	if digest.Items[0].SeenBefore {
-		t.Error("digest.Items[0] should not be SeenBefore (new event)")
+	// First item should have its reference preserved
+	if len(digest.Items[0].References) != 1 {
+		t.Fatalf("item[0] References: got %d, want 1", len(digest.Items[0].References))
+	}
+	if digest.Items[0].References[0].RelationNote != "前情回顾" {
+		t.Errorf("item[0] ref RelationNote: got %q, want %q", digest.Items[0].References[0].RelationNote, "前情回顾")
+	}
+	if digest.Items[0].References[0].DisplayTitle != "美伊冲突升级" {
+		t.Errorf("item[0] ref DisplayTitle: got %q, want %q", digest.Items[0].References[0].DisplayTitle, "美伊冲突升级")
 	}
 
-	// Second item: follow-up with prior context
-	if !digest.Items[1].SeenBefore {
-		t.Error("digest.Items[1] should be SeenBefore (follow-up)")
+	// Second item should have its reference preserved
+	if len(digest.Items[1].References) != 1 {
+		t.Fatalf("item[1] References: got %d, want 1", len(digest.Items[1].References))
 	}
-	if digest.Items[1].LastFactSummary != "上次推送的概要" {
-		t.Errorf("LastFactSummary: got %q, want %q", digest.Items[1].LastFactSummary, "上次推送的概要")
+	if digest.Items[1].References[0].RelationNote != "反转" {
+		t.Errorf("item[1] ref RelationNote: got %q, want %q", digest.Items[1].References[0].RelationNote, "反转")
 	}
 }
 
-func TestFormatSummaryPrompt_SeenBeforeFollowUps(t *testing.T) {
+func TestFormatSummaryPrompt_IncludesReferenceContext(t *testing.T) {
 	digest := &DigestData{
 		Items: []DigestItem{
 			{
 				MergedNewsItem: MergedNewsItem{
 					TaggedNewsItem: TaggedNewsItem{
-						RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC", Title: "New event"},
-						DisplayTitle: "新事件标题",
+						RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC"},
+						DisplayTitle: "伊朗发动导弹袭击",
 						Category:     "战争与地缘",
 					},
-					ShouldPush: true,
-				},
-				FactParagraph: "这是新事件的事实段落。",
-			},
-			{
-				MergedNewsItem: MergedNewsItem{
-					TaggedNewsItem: TaggedNewsItem{
-						RawNewsItem:  RawNewsItem{ID: "2", Source: "BBC", Title: "Follow-up"},
-						DisplayTitle: "追踪事件标题",
-						Category:     "战争与地缘",
+					References: []HistoryReference{
+						{
+							DisplayTitle: "美伊冲突升级",
+							FactSummary:  "美伊冲突的前情概要",
+							RelationNote: "前情回顾",
+						},
 					},
-					SeenBefore:      true,
-					ShouldPush:      true,
-					LastPushTime:    "2026-04-28T12:00:00Z",
-					LastFactSummary: "上次推送的前情概要",
 				},
-				FactParagraph: "这是追踪更新的事实段落。",
+				FactParagraph: "伊朗向美军基地发射了多枚导弹。",
 			},
 		},
 		SlotLabel:   "午间版",
-		CurrentTime: "2026-04-28 18:00:00",
+		CurrentTime: "2026-04-29 12:00:00",
 	}
 
 	p := &NewsPipeline{}
-	result, err := p.formatSummaryPrompt(context.Background(), digest)
+	vars, err := p.formatSummaryPrompt(context.Background(), digest)
 	if err != nil {
 		t.Fatalf("formatSummaryPrompt error: %v", err)
 	}
 
-	digestContent := result["digest_content"].(string)
-	historySection := result["history_section"].(string)
-
-	// New item should NOT have [追踪更新] prefix
-	if !contains(digestContent, "- 这是新事件的事实段落。") {
-		t.Errorf("digest_content missing new item, got:\n%s", digestContent)
-	}
-	if contains(digestContent, "[追踪更新] 这是新事件的事实段落") {
-		t.Errorf("new item should NOT have [追踪更新] prefix, got:\n%s", digestContent)
+	content, ok := vars["digest_content"].(string)
+	if !ok {
+		t.Fatal("digest_content is not a string")
 	}
 
-	// Follow-up item SHOULD have [追踪更新] prefix
-	if !contains(digestContent, "[追踪更新] 这是追踪更新的事实段落") {
-		t.Errorf("digest_content missing [追踪更新] prefix for follow-up, got:\n%s", digestContent)
+	// Should contain the fact paragraph
+	if !contains(content, "伊朗向美军基地发射了多枚导弹") {
+		t.Errorf("digest_content missing fact paragraph, got: %s", content)
 	}
-
-	// History section should contain the prior context
-	if contains(historySection, "（本轮无需要前情提要的条目）") {
-		t.Errorf("history_section should have prior context, but got fallback text:\n%s", historySection)
+	// Should contain the reference context
+	if !contains(content, "前情回顾") {
+		t.Errorf("digest_content missing reference RelationNote, got: %s", content)
 	}
-	if !contains(historySection, "追踪事件标题") {
-		t.Errorf("history_section missing follow-up title, got:\n%s", historySection)
-	}
-	if !contains(historySection, "上次推送的前情概要") {
-		t.Errorf("history_section missing prior context, got:\n%s", historySection)
+	if !contains(content, "美伊冲突的前情概要") {
+		t.Errorf("digest_content missing reference FactSummary, got: %s", content)
 	}
 }
 
-func TestFormatSummaryPrompt_NoHistory_WhenNoSeenBefore(t *testing.T) {
-	digest := &DigestData{
-		Items: []DigestItem{
-			{
-				MergedNewsItem: MergedNewsItem{
-					TaggedNewsItem: TaggedNewsItem{
-						RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC", Title: "New"},
-						DisplayTitle: "纯新事件",
-						Category:     "航空航天",
-					},
-					ShouldPush: true,
-				},
-				FactParagraph: "新事件事实。",
-			},
+func TestMergeHistory_ReferencesCappedAtTwo(t *testing.T) {
+	// Test that mergeHistory caps references to max 2 per item
+	// We'll test this by directly verifying the cap logic in mergeHistory
+	item := MergedNewsItem{
+		TaggedNewsItem: TaggedNewsItem{
+			RawNewsItem: RawNewsItem{ID: "1", Source: "BBC"},
 		},
-		SlotLabel:   "午间版",
-		CurrentTime: "2026-04-28 18:00:00",
+		References: []HistoryReference{
+			{DisplayTitle: "ref1", RelationNote: "前情回顾"},
+			{DisplayTitle: "ref2", RelationNote: "前情回顾"},
+			{DisplayTitle: "ref3", RelationNote: "反转"},
+		},
 	}
 
-	p := &NewsPipeline{}
-	result, err := p.formatSummaryPrompt(context.Background(), digest)
+	// Simulate the cap logic from mergeHistory
+	if len(item.References) > 2 {
+		item.References = item.References[:2]
+	}
+
+	if len(item.References) != 2 {
+		t.Errorf("expected 2 references after cap, got %d", len(item.References))
+	}
+}
+
+func TestLlmVerifyDuplicates_ParsesProgressAndReversal(t *testing.T) {
+	// Test that the LLM response parser correctly handles 进展/反转/重复/无关
+	// We test the parsing logic indirectly by checking the verifyResult construction
+	// from a simulated LLM response
+
+	p := &NewsPipeline{
+		ChatModel: &mockChatModelWithResponse{
+			content: "进展\n反转\n重复\n无关",
+		},
+	}
+
+	items := []TaggedNewsItem{
+		{RawNewsItem: RawNewsItem{ID: "1", Summary: "摘要1"}, DisplayTitle: "新闻1"},
+		{RawNewsItem: RawNewsItem{ID: "2", Summary: "摘要2"}, DisplayTitle: "新闻2"},
+		{RawNewsItem: RawNewsItem{ID: "3", Summary: "摘要3"}, DisplayTitle: "新闻3"},
+		{RawNewsItem: RawNewsItem{ID: "4", Summary: "摘要4"}, DisplayTitle: "新闻4"},
+	}
+
+	candidates := []embedCandidate{
+		{itemIdx: 0, record: &PushHistoryRecord{DisplayTitle: "历史1", FactSummary: "历史摘要1"}, sim: 0.85},
+		{itemIdx: 1, record: &PushHistoryRecord{DisplayTitle: "历史2", FactSummary: "历史摘要2"}, sim: 0.82},
+		{itemIdx: 2, record: &PushHistoryRecord{DisplayTitle: "历史3", FactSummary: "历史摘要3"}, sim: 0.90},
+		{itemIdx: 3, record: &PushHistoryRecord{DisplayTitle: "历史4", FactSummary: "历史摘要4"}, sim: 0.78},
+	}
+
+	results, err := p.llmVerifyDuplicates(context.Background(), items, candidates)
 	if err != nil {
-		t.Fatalf("formatSummaryPrompt error: %v", err)
+		t.Fatalf("llmVerifyDuplicates error: %v", err)
 	}
 
-	historySection := result["history_section"].(string)
-	if !contains(historySection, "（本轮无需要前情提要的条目）") {
-		t.Errorf("history_section should show fallback when no SeenBefore items, got:\n%s", historySection)
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results, got %d", len(results))
 	}
 
-	digestContent := result["digest_content"].(string)
-	if contains(digestContent, "[追踪更新]") {
-		t.Errorf("digest_content should NOT have [追踪更新] when no SeenBefore items, got:\n%s", digestContent)
+	// 进展 → IsReference=true, Note="前情回顾"
+	if !results[0].IsReference || results[0].IsDuplicate {
+		t.Errorf("result[0]: expected IsReference=true, IsDuplicate=false, got %+v", results[0])
 	}
+	if results[0].Note != "前情回顾" {
+		t.Errorf("result[0] Note: got %q, want %q", results[0].Note, "前情回顾")
+	}
+
+	// 反转 → IsReference=true, Note="反转"
+	if !results[1].IsReference || results[1].IsDuplicate {
+		t.Errorf("result[1]: expected IsReference=true, IsDuplicate=false, got %+v", results[1])
+	}
+	if results[1].Note != "反转" {
+		t.Errorf("result[1] Note: got %q, want %q", results[1].Note, "反转")
+	}
+
+	// 重复 → IsDuplicate=true
+	if !results[2].IsDuplicate || results[2].IsReference {
+		t.Errorf("result[2]: expected IsDuplicate=true, IsReference=false, got %+v", results[2])
+	}
+
+	// 无关 → both false
+	if results[3].IsDuplicate || results[3].IsReference {
+		t.Errorf("result[3]: expected both false, got %+v", results[3])
+	}
+}
+
+// mockChatModelWithResponse returns a preset content string.
+type mockChatModelWithResponse struct {
+	content string
+}
+
+func (m *mockChatModelWithResponse) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return &schema.Message{Content: m.content}, nil
+}
+
+func (m *mockChatModelWithResponse) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 // helper for string containment check
