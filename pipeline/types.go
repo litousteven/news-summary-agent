@@ -34,14 +34,21 @@ type NewsCluster struct {
 	Representative int // index of the representative item
 }
 
+// HistoryReference is a related historical news item with further developments or reversals.
+type HistoryReference struct {
+	DisplayTitle string `json:"display_title"`
+	Link         string `json:"link"`
+	PushTime     string `json:"push_time"`
+	FactSummary  string `json:"fact_summary"`
+	RelationNote string `json:"relation_note"` // e.g. "后续进展" or "反转"
+}
+
 // MergedNewsItem is a tagged item enriched with push history info.
 type MergedNewsItem struct {
 	TaggedNewsItem
-	SeenBefore      bool   `json:"seen_before"`
-	ShouldPush      bool   `json:"should_push"`
-	LastPushTime    string `json:"last_push_time"`
-	LastFactSummary string `json:"last_fact_summary"`
-	HistoryNote     string `json:"history_note"`
+	SeenBefore  bool              `json:"seen_before"`
+	HistoryNote string            `json:"history_note"`
+	References  []HistoryReference `json:"references"`
 }
 
 // DigestData is the structured digest ready for summarization.
@@ -173,8 +180,4 @@ const (
 	DefaultMaxPerCategory   = 3
 	DefaultClusterThreshold = 0.75
 	DefaultFileExpiryDays  = 2
-
-	// SeenBeforePushThreshold is the minimum InterestScore for a seen-before
-	// item to still enter the digest as a follow-up (with prior context).
-	SeenBeforePushThreshold = 8
 )

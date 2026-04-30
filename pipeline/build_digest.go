@@ -13,16 +13,16 @@ import (
 
 // buildDigest selects, ranks, and formats news items into a digest.
 func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) (*DigestData, error) {
-	// Filter: only items that should be pushed
-	selected := make([]MergedNewsItem, 0)
+	// Exclude duplicates (SeenBefore = already pushed)
+	candidates := make([]MergedNewsItem, 0)
 	for _, item := range items {
-		if item.ShouldPush {
-			selected = append(selected, item)
+		if !item.SeenBefore {
+			candidates = append(candidates, item)
 		}
 	}
 
 	// Deduplicate by link/title, keeping best source
-	merged := dedupByTitle(selected)
+	merged := dedupByTitle(candidates)
 
 	// Semantic dedup: remove within-batch duplicates missed by exact match
 	merged = p.dedupByEmbedding(ctx, merged)
@@ -37,19 +37,20 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 		byCategory[cat] = append(byCategory[cat], item)
 	}
 
-	// Sort within each category by source rank
+	// Sort within each category: InterestScore descending, source rank as tiebreaker
 	for cat := range byCategory {
 		sort.Slice(byCategory[cat], func(i, j int) bool {
+			si, sj := byCategory[cat][i].InterestScore, byCategory[cat][j].InterestScore
+			if si != sj {
+				return si > sj
+			}
 			ri := SourceRank[byCategory[cat][i].Source]
 			rj := SourceRank[byCategory[cat][j].Source]
-			if ri != rj {
-				return ri < rj
-			}
-			return byCategory[cat][i].InterestScore > byCategory[cat][j].InterestScore
+			return ri < rj
 		})
 	}
 
-	// Build final list with limits: max GetMaxPerCategory() per category, Getp.GetMaxDigestItems()() total
+	// Build final list: select top-N per category by InterestScore, up to MaxDigestItems total
 	var digestItems []DigestItem
 	catCount := make(map[string]int)
 	for _, cat := range CategoryOrder {
