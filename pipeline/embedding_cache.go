@@ -95,6 +95,10 @@ func CachedEmbedStrings(ctx context.Context, p *NewsPipeline, texts []string) ([
 	if p.Embedding == nil {
 		return nil, nil
 	}
+	// If cache not initialized, fall back to direct embedding
+	if p.EmbedCache == nil {
+		return p.Embedding.EmbedStrings(ctx, texts)
+	}
 	hashes := make([]string, len(texts))
 	for i, t := range texts {
 		hashes[i] = embedHash(t)
