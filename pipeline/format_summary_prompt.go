@@ -21,8 +21,12 @@ func (p *NewsPipeline) formatSummaryPrompt(ctx context.Context, digest *DigestDa
 		}
 		contentBuilder.WriteString(fmt.Sprintf("- %s\n", item.FactParagraph))
 		// Append references as context for LLM
-		for _, ref := range item.References {
-			contentBuilder.WriteString(fmt.Sprintf("  [%s] %s\n", ref.RelationNote, ref.FactSummary))
+		for _, ref := range item.Refs {
+			if ref.FactSummary != "" {
+				contentBuilder.WriteString(fmt.Sprintf("  [%s] %s\n", ref.RelationNote, ref.FactSummary))
+			} else {
+				contentBuilder.WriteString(fmt.Sprintf("  [%s] %s（%s）\n", ref.RelationNote, ref.DisplayTitle, ref.Source))
+			}
 		}
 	}
 

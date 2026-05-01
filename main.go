@@ -150,7 +150,7 @@ func writeDigestMD(dataDir string, result *pipeline.NewsSummaryResult) error {
 			b.WriteString(fmt.Sprintf("  来源: %s\n", item.Source))
 		}
 		// Render references as Markdown quotes
-		for _, ref := range item.References {
+		for _, ref := range item.Refs {
 			if ref.Link != "" {
 				b.WriteString(fmt.Sprintf("  > %s: [%s](%s)\n", ref.RelationNote, ref.DisplayTitle, ref.Link))
 			} else {
