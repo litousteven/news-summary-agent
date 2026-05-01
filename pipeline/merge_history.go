@@ -232,10 +232,10 @@ func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []Me
 			results[answerIdx] = verifyResult{IsDuplicate: true}
 			answerIdx++
 		} else if strings.Contains(line, "进展") {
-			results[answerIdx] = verifyResult{IsReference: true, Note: "前情回顾"}
+			results[answerIdx] = verifyResult{IsReference: true, Note: "相关"}
 			answerIdx++
 		} else if strings.Contains(line, "反转") {
-			results[answerIdx] = verifyResult{IsReference: true, Note: "反转"}
+			results[answerIdx] = verifyResult{IsReference: true, Note: "相关"}
 			answerIdx++
 		} else if strings.Contains(line, "无关") {
 			results[answerIdx] = verifyResult{}

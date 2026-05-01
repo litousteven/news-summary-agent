@@ -52,13 +52,18 @@ func main() {
 	// Load config from config/config.yaml
 	cfg := pipeline.LoadConfig(absConfigDir)
 
+	// Initialize embedding cache
+	embedCache := pipeline.NewEmbeddingCache(absDataDir)
+	embedCache.Load()
+
 	p := &pipeline.NewsPipeline{
-		ChatModel: chatModel,
-		Embedding: embeddingClient,
-		ConfigDir: absConfigDir,
-		DataDir:   absDataDir,
-		ProxyAddr: os.Getenv("PROXY_ADDR"),
-		Config:    cfg,
+		ChatModel:  chatModel,
+		Embedding:  embeddingClient,
+		EmbedCache: embedCache,
+		ConfigDir:  absConfigDir,
+		DataDir:    absDataDir,
+		ProxyAddr:  os.Getenv("PROXY_ADDR"),
+		Config:     cfg,
 	}
 
 	// Cleanup expired data files before pipeline run
@@ -75,6 +80,9 @@ func main() {
 	fmt.Println(result.Message)
 	fmt.Printf("\n统计: 抓取=%d, 标注=%d, 入选=%d\n",
 		result.Stats.TotalFetched, result.Stats.TotalTagged, result.Stats.TotalSelected)
+
+	// Save embedding cache
+	embedCache.Save()
 
 	// Write push items to a timestamped .md file
 	if len(result.DigestItems) > 0 {
@@ -99,9 +107,9 @@ func createChatModel(ctx context.Context) (model.BaseChatModel, error) {
 
 	maxTokens := 16384
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		BaseURL:  baseURL,
-		Model:    modelName,
-		APIKey:   apiKey,
+		BaseURL:   baseURL,
+		Model:     modelName,
+		APIKey:    apiKey,
 		MaxTokens: &maxTokens,
 	})
 	if err != nil {
