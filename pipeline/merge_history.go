@@ -57,7 +57,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 			}
 		}
 		if len(missing) > 0 {
-			vecs, err := p.Embedding.EmbedStrings(ctx, missing)
+			vecs, err := CachedEmbedStrings(ctx, p, missing)
 			if err == nil && len(vecs) == len(missing) {
 				for j, idx := range missingIdx {
 					history[idx].Embedding = vecs[j]
@@ -74,7 +74,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 		for i, item := range merged {
 			texts[i] = item.DisplayTitle + " " + item.Summary
 		}
-		vecs, err := p.Embedding.EmbedStrings(ctx, texts)
+		vecs, err := CachedEmbedStrings(ctx, p, texts)
 		if err == nil && len(vecs) == len(merged) {
 			itemEmbeds = vecs
 		}

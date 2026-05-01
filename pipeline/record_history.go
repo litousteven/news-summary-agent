@@ -91,7 +91,7 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []Dige
 		for i, item := range items {
 			texts[i] = item.DisplayTitle + " " + item.FactParagraph
 		}
-		vecs, err := p.Embedding.EmbedStrings(ctx, texts)
+		vecs, err := CachedEmbedStrings(ctx, p, texts)
 		if err == nil && len(vecs) == len(items) {
 			embeddings = vecs
 		}
