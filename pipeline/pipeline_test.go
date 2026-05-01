@@ -911,12 +911,12 @@ func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
 	items := []MergedNewsItem{
 		{
 			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:   RawNewsItem{ID: "1", Source: "BBC", Title: "Iran strike", Summary: "Iran launched missiles"},
+				RawNewsItem:   RawNewsItem{ID: "1", Source: "BBC", Title: "Iran strike", Summary: "Iran launched missiles", Link: "https://bbc.co.uk/2"},
 				DisplayTitle:  "伊朗发动导弹袭击",
 				Category:      "战争与地缘",
 				InterestScore: 9,
 			},
-			References: []HistoryReference{
+			Refs: []NewsReference{
 				{
 					DisplayTitle: "美伊冲突升级",
 					Link:         "https://bbc.co.uk/1",
@@ -928,12 +928,12 @@ func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
 		},
 		{
 			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:   RawNewsItem{ID: "2", Source: "NPR", Title: "AI breakthrough", Summary: "New AI model released"},
+				RawNewsItem:   RawNewsItem{ID: "2", Source: "NPR", Title: "AI breakthrough", Summary: "New AI model released", Link: "https://npr.org/2"},
 				DisplayTitle:  "AI新突破",
 				Category:      "AI与数码",
 				InterestScore: 8,
 			},
-			References: []HistoryReference{
+			Refs: []NewsReference{
 				{
 					DisplayTitle: "AI模型发展",
 					Link:         "https://npr.org/1",
@@ -955,23 +955,21 @@ func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
 		t.Fatalf("expected 2 digest items, got %d", len(digest.Items))
 	}
 
-	// First item should have its reference preserved
-	if len(digest.Items[0].References) != 1 {
-		t.Fatalf("item[0] References: got %d, want 1", len(digest.Items[0].References))
+	if len(digest.Items[0].Refs) != 1 {
+		t.Fatalf("item[0] Refs: got %d, want 1", len(digest.Items[0].Refs))
 	}
-	if digest.Items[0].References[0].RelationNote != "前情回顾" {
-		t.Errorf("item[0] ref RelationNote: got %q, want %q", digest.Items[0].References[0].RelationNote, "前情回顾")
+	if digest.Items[0].Refs[0].RelationNote != "前情回顾" {
+		t.Errorf("item[0] ref RelationNote: got %q, want %q", digest.Items[0].Refs[0].RelationNote, "前情回顾")
 	}
-	if digest.Items[0].References[0].DisplayTitle != "美伊冲突升级" {
-		t.Errorf("item[0] ref DisplayTitle: got %q, want %q", digest.Items[0].References[0].DisplayTitle, "美伊冲突升级")
+	if digest.Items[0].Refs[0].DisplayTitle != "美伊冲突升级" {
+		t.Errorf("item[0] ref DisplayTitle: got %q, want %q", digest.Items[0].Refs[0].DisplayTitle, "美伊冲突升级")
 	}
 
-	// Second item should have its reference preserved
-	if len(digest.Items[1].References) != 1 {
-		t.Fatalf("item[1] References: got %d, want 1", len(digest.Items[1].References))
+	if len(digest.Items[1].Refs) != 1 {
+		t.Fatalf("item[1] Refs: got %d, want 1", len(digest.Items[1].Refs))
 	}
-	if digest.Items[1].References[0].RelationNote != "反转" {
-		t.Errorf("item[1] ref RelationNote: got %q, want %q", digest.Items[1].References[0].RelationNote, "反转")
+	if digest.Items[1].Refs[0].RelationNote != "反转" {
+		t.Errorf("item[1] ref RelationNote: got %q, want %q", digest.Items[1].Refs[0].RelationNote, "反转")
 	}
 }
 
@@ -985,7 +983,7 @@ func TestFormatSummaryPrompt_IncludesReferenceContext(t *testing.T) {
 						DisplayTitle: "伊朗发动导弹袭击",
 						Category:     "战争与地缘",
 					},
-					References: []HistoryReference{
+					Refs: []NewsReference{
 						{
 							DisplayTitle: "美伊冲突升级",
 							FactSummary:  "美伊冲突的前情概要",
@@ -1011,11 +1009,9 @@ func TestFormatSummaryPrompt_IncludesReferenceContext(t *testing.T) {
 		t.Fatal("digest_content is not a string")
 	}
 
-	// Should contain the fact paragraph
 	if !contains(content, "伊朗向美军基地发射了多枚导弹") {
 		t.Errorf("digest_content missing fact paragraph, got: %s", content)
 	}
-	// Should contain the reference context
 	if !contains(content, "前情回顾") {
 		t.Errorf("digest_content missing reference RelationNote, got: %s", content)
 	}
@@ -1025,26 +1021,23 @@ func TestFormatSummaryPrompt_IncludesReferenceContext(t *testing.T) {
 }
 
 func TestMergeHistory_ReferencesCappedAtTwo(t *testing.T) {
-	// Test that mergeHistory caps references to max 2 per item
-	// We'll test this by directly verifying the cap logic in mergeHistory
 	item := MergedNewsItem{
 		TaggedNewsItem: TaggedNewsItem{
 			RawNewsItem: RawNewsItem{ID: "1", Source: "BBC"},
 		},
-		References: []HistoryReference{
+		Refs: []NewsReference{
 			{DisplayTitle: "ref1", RelationNote: "前情回顾"},
 			{DisplayTitle: "ref2", RelationNote: "前情回顾"},
 			{DisplayTitle: "ref3", RelationNote: "反转"},
 		},
 	}
 
-	// Simulate the cap logic from mergeHistory
-	if len(item.References) > 2 {
-		item.References = item.References[:2]
+	if len(item.Refs) > 2 {
+		item.Refs = item.Refs[:2]
 	}
 
-	if len(item.References) != 2 {
-		t.Errorf("expected 2 references after cap, got %d", len(item.References))
+	if len(item.Refs) != 2 {
+		t.Errorf("expected 2 references after cap, got %d", len(item.Refs))
 	}
 }
 
@@ -1059,11 +1052,11 @@ func TestLlmVerifyDuplicates_ParsesProgressAndReversal(t *testing.T) {
 		},
 	}
 
-	items := []TaggedNewsItem{
-		{RawNewsItem: RawNewsItem{ID: "1", Summary: "摘要1"}, DisplayTitle: "新闻1"},
-		{RawNewsItem: RawNewsItem{ID: "2", Summary: "摘要2"}, DisplayTitle: "新闻2"},
-		{RawNewsItem: RawNewsItem{ID: "3", Summary: "摘要3"}, DisplayTitle: "新闻3"},
-		{RawNewsItem: RawNewsItem{ID: "4", Summary: "摘要4"}, DisplayTitle: "新闻4"},
+	items := []MergedNewsItem{
+		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "1", Summary: "摘要1"}, DisplayTitle: "新闻1"}},
+		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "2", Summary: "摘要2"}, DisplayTitle: "新闻2"}},
+		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "3", Summary: "摘要3"}, DisplayTitle: "新闻3"}},
+		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "4", Summary: "摘要4"}, DisplayTitle: "新闻4"}},
 	}
 
 	candidates := []embedCandidate{
@@ -1073,9 +1066,9 @@ func TestLlmVerifyDuplicates_ParsesProgressAndReversal(t *testing.T) {
 		{itemIdx: 3, record: &PushHistoryRecord{DisplayTitle: "历史4", FactSummary: "历史摘要4"}, sim: 0.78},
 	}
 
-	results, err := p.llmVerifyDuplicates(context.Background(), items, candidates)
+	results, err := p.llmVerifyDuplicatesMerged(context.Background(), items, candidates)
 	if err != nil {
-		t.Fatalf("llmVerifyDuplicates error: %v", err)
+		t.Fatalf("llmVerifyDuplicatesMerged error: %v", err)
 	}
 
 	if len(results) != 4 {

@@ -13,23 +13,17 @@ import (
 
 // buildDigest selects, ranks, and formats news items into a digest.
 func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) (*DigestData, error) {
-	// Exclude duplicates (SeenBefore = already pushed)
+	merged := p.dedupAndLinkBatch(ctx, items)
+
 	candidates := make([]MergedNewsItem, 0)
-	for _, item := range items {
+	for _, item := range merged {
 		if !item.SeenBefore {
 			candidates = append(candidates, item)
 		}
 	}
 
-	// Deduplicate by link/title, keeping best source
-	merged := dedupByTitle(candidates)
-
-	// Semantic dedup: remove within-batch duplicates missed by exact match
-	merged = p.dedupByEmbedding(ctx, merged)
-
-	// Group by category
 	byCategory := make(map[string][]MergedNewsItem)
-	for _, item := range merged {
+	for _, item := range candidates {
 		cat := item.Category
 		if cat == "" {
 			cat = "其他重要动态"
@@ -37,7 +31,6 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 		byCategory[cat] = append(byCategory[cat], item)
 	}
 
-	// Sort within each category: InterestScore descending, source rank as tiebreaker
 	for cat := range byCategory {
 		sort.Slice(byCategory[cat], func(i, j int) bool {
 			si, sj := byCategory[cat][i].InterestScore, byCategory[cat][j].InterestScore
@@ -50,7 +43,8 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 		})
 	}
 
-	// Build final list: select top-N per category by InterestScore, up to MaxDigestItems total
+	// First pass: select candidates per category
+	selectedLinks := make(map[string]bool)
 	var digestItems []DigestItem
 	catCount := make(map[string]int)
 	for _, cat := range CategoryOrder {
@@ -65,19 +59,41 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 			if len(digestItems) >= p.GetMaxDigestItems() {
 				break
 			}
+			if selectedLinks[item.Link] {
+				continue
+			}
 			fp := buildFactParagraph(item)
 			digestItems = append(digestItems, DigestItem{
 				MergedNewsItem: item,
 				FactParagraph:  fp,
 			})
 			catCount[cat]++
+			selectedLinks[item.Link] = true
 		}
 		if len(digestItems) >= p.GetMaxDigestItems() {
 			break
 		}
 	}
 
-	// Stats
+	// Second pass: remove items that are now referenced by higher-priority selected items
+	finalItems := make([]DigestItem, 0, len(digestItems))
+	referencedLinks := make(map[string]bool)
+	for _, item := range digestItems {
+		for _, ref := range item.MergedNewsItem.Refs {
+			referencedLinks[ref.Link] = true
+		}
+	}
+	for _, item := range digestItems {
+		if referencedLinks[item.Link] {
+			// This item was already selected as a lower-priority candidate,
+			// but is now referenced by a higher-priority item. Remove it.
+			catCount[item.Category]--
+		} else {
+			finalItems = append(finalItems, item)
+		}
+	}
+	digestItems = finalItems
+
 	stats := DigestStats{
 		TotalFetched:  len(items),
 		TotalTagged:   len(items),
@@ -85,7 +101,6 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 		ByCategory:    catCount,
 	}
 
-	// Slot label: use the slot from the request if available, otherwise infer from current time
 	slotLabel := getSlotLabel()
 	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
 		if state.Slot != "" {
@@ -100,38 +115,6 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 		CurrentTime: currentTimeStr(),
 		Stats:       stats,
 	}, nil
-}
-
-// dedupByTitle keeps the best source for each unique display_title or link.
-// Titles are normalized (trimmed, lowercased) for matching.
-func dedupByTitle(items []MergedNewsItem) []MergedNewsItem {
-	best := make(map[string]MergedNewsItem)
-	for _, item := range items {
-		// Primary key: link (most reliable dedup signal)
-		key := strings.TrimSpace(item.Link)
-		if key == "" {
-			// Fallback: display_title
-			key = strings.TrimSpace(item.DisplayTitle)
-			if key == "" {
-				key = strings.TrimSpace(item.Title)
-			}
-			key = strings.ToLower(key)
-		}
-		existing, ok := best[key]
-		if !ok {
-			best[key] = item
-			continue
-		}
-		// Keep the one with better source rank
-		if SourceRank[item.Source] < SourceRank[existing.Source] {
-			best[key] = item
-		}
-	}
-	result := make([]MergedNewsItem, 0, len(best))
-	for _, item := range best {
-		result = append(result, item)
-	}
-	return result
 }
 
 // buildFactParagraph constructs a fact paragraph from a news item.
@@ -241,74 +224,4 @@ var currentTime = func() time.Time {
 
 func currentTimeStr() string {
 	return currentTime().Format("2006-01-02 15:04:05")
-}
-
-// dedupByEmbedding removes within-batch semantic duplicates using embedding similarity.
-// Items with similarity >= GetClusterThreshold() are grouped, keeping the one with the best source rank.
-func (p *NewsPipeline) dedupByEmbedding(ctx context.Context, items []MergedNewsItem) []MergedNewsItem {
-	if p.Embedding == nil || len(items) <= 1 {
-		return items
-	}
-
-	// Compute embeddings for all items
-	texts := make([]string, len(items))
-	for i, item := range items {
-		texts[i] = item.DisplayTitle + " " + item.Summary
-	}
-	vecs, err := p.Embedding.EmbedStrings(ctx, texts)
-	if err != nil || len(vecs) != len(items) {
-		return items
-	}
-
-	// Find clusters of similar items using union-find
-	parent := make([]int, len(items))
-	for i := range parent {
-		parent[i] = i
-	}
-	var find func(int) int
-	find = func(x int) int {
-		if parent[x] != x {
-			parent[x] = find(parent[x])
-		}
-		return parent[x]
-	}
-	union := func(a, b int) {
-		ra, rb := find(a), find(b)
-		if ra != rb {
-			parent[ra] = rb
-		}
-	}
-
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[i].Category != items[j].Category {
-				continue // only dedup within same category
-			}
-			sim := cosineSimilarity(vecs[i], vecs[j])
-			if sim >= p.GetClusterThreshold() {
-				union(i, j)
-			}
-		}
-	}
-
-	// For each cluster, keep the best item (lowest source rank)
-	clusters := make(map[int][]int) // root -> indices
-	for i := range items {
-		root := find(i)
-		clusters[root] = append(clusters[root], i)
-	}
-
-	result := make([]MergedNewsItem, 0, len(clusters))
-	for _, indices := range clusters {
-		best := indices[0]
-		for _, idx := range indices[1:] {
-			if SourceRank[items[idx].Source] < SourceRank[items[best].Source] {
-				best = idx
-			} else if SourceRank[items[idx].Source] == SourceRank[items[best].Source] && items[idx].InterestScore > items[best].InterestScore {
-				best = idx
-			}
-		}
-		result = append(result, items[best])
-	}
-	return result
 }

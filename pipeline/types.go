@@ -34,21 +34,25 @@ type NewsCluster struct {
 	Representative int // index of the representative item
 }
 
-// HistoryReference is a related historical news item with further developments or reversals.
-type HistoryReference struct {
-	DisplayTitle string `json:"display_title"`
-	Link         string `json:"link"`
-	PushTime     string `json:"push_time"`
-	FactSummary  string `json:"fact_summary"`
-	RelationNote string `json:"relation_note"` // e.g. "后续进展" or "反转"
+// NewsReference is a related news item, either from the same batch or from push history.
+// RelationNote indicates the relationship: "相关报道", "后续进展", "反转", etc.
+type NewsReference struct {
+	DisplayTitle string  `json:"display_title"`
+	Source       string  `json:"source"`
+	Link         string  `json:"link"`
+	PushTime     string  `json:"push_time,omitempty"` // only for history references
+	FactSummary  string  `json:"fact_summary,omitempty"` // only for history references
+	Similarity   float64 `json:"similarity,omitempty"`   // only for batch references
+	RelationNote string  `json:"relation_note"`           // "相关报道" / "后续进展" / "反转"
 }
 
 // MergedNewsItem is a tagged item enriched with push history info.
 type MergedNewsItem struct {
 	TaggedNewsItem
-	SeenBefore  bool              `json:"seen_before"`
-	HistoryNote string            `json:"history_note"`
-	References  []HistoryReference `json:"references"`
+	SeenBefore  bool             `json:"seen_before"`
+	HistoryNote string           `json:"history_note"`
+	Refs        []NewsReference  `json:"refs"`
+	Links       []string         `json:"links,omitempty"`
 }
 
 // DigestData is the structured digest ready for summarization.

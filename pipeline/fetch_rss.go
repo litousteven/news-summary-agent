@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"html"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -130,7 +131,8 @@ func (p *NewsPipeline) fetchFeed(ctx context.Context, src FeedSource) ([]*gofeed
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml, */*")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -142,9 +144,22 @@ func (p *NewsPipeline) fetchFeed(ctx context.Context, src FeedSource) ([]*gofeed
 		return nil, fmt.Errorf("fetch %s: status %d", src.Name, resp.StatusCode)
 	}
 
-	fp := gofeed.NewParser()
-	feed, err := fp.Parse(resp.Body)
+	// Read body into a buffer so we can inspect it on failure
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", src.Name, err)
+	}
+
+	fp := gofeed.NewParser()
+	feed, err := fp.ParseString(string(body))
+	if err != nil {
+		// Log first 200 bytes of response for debugging
+		contentType := resp.Header.Get("Content-Type")
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200] + "..."
+		}
+		log.Printf("[FetchRSS] %s 解析失败: Content-Type=%s, 响应前200字节: %s", src.Name, contentType, snippet)
 		return nil, fmt.Errorf("parse %s: %w", src.Name, err)
 	}
 
