@@ -57,7 +57,7 @@
   url: http://rss.cnn.com/rss/edition.rss
   lang: en
   use_proxy: false
-  enabled: false
+  enabled: true
 
 - name: Washington Post
   url: https://feeds.washingtonpost.com/rss/world

@@ -1075,20 +1075,20 @@ func TestLlmVerifyDuplicates_ParsesProgressAndReversal(t *testing.T) {
 		t.Fatalf("expected 4 results, got %d", len(results))
 	}
 
-	// 进展 → IsReference=true, Note="前情回顾"
+	// 进展 → IsReference=true, Note="相关"
 	if !results[0].IsReference || results[0].IsDuplicate {
 		t.Errorf("result[0]: expected IsReference=true, IsDuplicate=false, got %+v", results[0])
 	}
-	if results[0].Note != "前情回顾" {
-		t.Errorf("result[0] Note: got %q, want %q", results[0].Note, "前情回顾")
+	if results[0].Note != "相关" {
+		t.Errorf("result[0] Note: got %q, want %q", results[0].Note, "相关")
 	}
 
-	// 反转 → IsReference=true, Note="反转"
+	// 反转 → IsReference=true, Note="相关"
 	if !results[1].IsReference || results[1].IsDuplicate {
 		t.Errorf("result[1]: expected IsReference=true, IsDuplicate=false, got %+v", results[1])
 	}
-	if results[1].Note != "反转" {
-		t.Errorf("result[1] Note: got %q, want %q", results[1].Note, "反转")
+	if results[1].Note != "相关" {
+		t.Errorf("result[1] Note: got %q, want %q", results[1].Note, "相关")
 	}
 
 	// 重复 → IsDuplicate=true

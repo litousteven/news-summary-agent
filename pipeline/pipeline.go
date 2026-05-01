@@ -16,6 +16,7 @@ const (
 	NodeParallelTag         = "ParallelTag"
 	NodeMergeHistory        = "MergeHistory"
 	NodeBuildDigest         = "BuildDigest"
+	NodeTranslateItems      = "TranslateItems"
 	NodeFormatSummaryPrompt = "FormatSummaryPrompt"
 	NodeSummaryTemplate     = "SummaryPromptTemplate"
 	NodeSummaryChatModel    = "SummaryChatModel"
@@ -165,7 +166,20 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		return nil, err
 	}
 
-	// 8. FormatSummaryPrompt — Lambda
+	// 8. TranslateItems — Lambda
+	// PostHandler: update DigestItems in shared state with translated data
+	if err := g.AddLambdaNode(NodeTranslateItems,
+		compose.InvokableLambda(p.TranslateItems),
+		compose.WithNodeName("翻译外语新闻"),
+		compose.WithStatePostHandler(func(ctx context.Context, out *DigestData, state *PipelineState) (*DigestData, error) {
+			state.DigestItems = out.Items
+			return out, nil
+		}),
+	); err != nil {
+		return nil, err
+	}
+
+	// 9. FormatSummaryPrompt — Lambda
 	if err := g.AddLambdaNode(NodeFormatSummaryPrompt,
 		compose.InvokableLambda(p.formatSummaryPrompt),
 		compose.WithNodeName("拼装摘要Prompt变量"),
@@ -215,7 +229,8 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		{NodeFetchRSS, NodeParallelTag},
 		{NodeParallelTag, NodeMergeHistory},
 		{NodeMergeHistory, NodeBuildDigest},
-		{NodeBuildDigest, NodeFormatSummaryPrompt},
+		{NodeBuildDigest, NodeTranslateItems},
+		{NodeTranslateItems, NodeFormatSummaryPrompt},
 		{NodeFormatSummaryPrompt, NodeSummaryTemplate},
 		{NodeSummaryTemplate, NodeSummaryChatModel},
 		{NodeSummaryChatModel, NodeRecordHistory},
