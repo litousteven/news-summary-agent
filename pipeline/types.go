@@ -31,7 +31,7 @@ type TaggedNewsItem struct {
 
 // NewsCluster is a group of semantically similar news items.
 type NewsCluster struct {
-	Items         []RawNewsItem
+	Items          []RawNewsItem
 	Representative int // index of the representative item
 }
 
@@ -41,19 +41,19 @@ type NewsReference struct {
 	DisplayTitle string  `json:"display_title"`
 	Source       string  `json:"source"`
 	Link         string  `json:"link"`
-	PushTime     string  `json:"push_time,omitempty"` // only for history references
+	PushTime     string  `json:"push_time,omitempty"`    // only for history references
 	FactSummary  string  `json:"fact_summary,omitempty"` // only for history references
 	Similarity   float64 `json:"similarity,omitempty"`   // only for batch references
-	RelationNote string  `json:"relation_note"`           // "相关报道" / "后续进展" / "反转"
+	RelationNote string  `json:"relation_note"`          // "相关报道" / "后续进展" / "反转"
 }
 
 // MergedNewsItem is a tagged item enriched with push history info.
 type MergedNewsItem struct {
 	TaggedNewsItem
-	SeenBefore  bool             `json:"seen_before"`
-	HistoryNote string           `json:"history_note"`
-	Refs        []NewsReference  `json:"refs"`
-	Links       []string         `json:"links,omitempty"`
+	SeenBefore  bool            `json:"seen_before"`
+	HistoryNote string          `json:"history_note"`
+	Refs        []NewsReference `json:"refs"`
+	Links       []string        `json:"links,omitempty"`
 }
 
 // DigestData is the structured digest ready for summarization.
@@ -80,23 +80,23 @@ type DigestStats struct {
 
 // PushHistoryRecord is a single record in push_history.jsonl.
 type PushHistoryRecord struct {
-	PushTime     string `json:"push_time"`
-	Slot         string `json:"slot"`
-	DisplayTitle string `json:"display_title"`
-	Category     string `json:"category"`
-	Source       string `json:"source"`
-	PublishedAt  string `json:"published_at"`
-	Link         string `json:"link"`
-	FactSummary  string `json:"fact_summary"`
-	RawTitle     string `json:"raw_title"`
+	PushTime     string    `json:"push_time"`
+	Slot         string    `json:"slot"`
+	DisplayTitle string    `json:"display_title"`
+	Category     string    `json:"category"`
+	Source       string    `json:"source"`
+	PublishedAt  string    `json:"published_at"`
+	Link         string    `json:"link"`
+	FactSummary  string    `json:"fact_summary"`
+	RawTitle     string    `json:"raw_title"`
 	Embedding    []float64 `json:"embedding,omitempty"`
 }
 
 // NewsSummaryResult is the final output of the pipeline.
 type NewsSummaryResult struct {
-	Message     string        `json:"message"`
-	Stats       DigestStats   `json:"stats"`
-	DigestItems []DigestItem  `json:"digest_items,omitempty"`
+	Message     string       `json:"message"`
+	Stats       DigestStats  `json:"stats"`
+	DigestItems []DigestItem `json:"digest_items,omitempty"`
 }
 
 // PipelineState is the shared state flowing through all graph nodes.
@@ -147,10 +147,10 @@ func init() {
 // Source ranking for dedup (lower = higher priority)
 var SourceRank = map[string]int{
 	"中新网":        0,
-	"BBC":         1,
-	"NPR":         2,
-	"NYT":         3,
-	"Al Jazeera":  4,
+	"BBC":        1,
+	"NPR":        2,
+	"NYT":        3,
+	"Al Jazeera": 4,
 }
 
 // Default RSS feeds (used when feeds.yaml is not found)
@@ -160,7 +160,8 @@ var DefaultFeeds = []FeedSource{
 	{Name: "BBC", URL: "https://feeds.bbci.co.uk/news/world/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
 	{Name: "NPR", URL: "https://feeds.npr.org/1004/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
 	{Name: "NYT", URL: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", Lang: "en", UseProxy: true, Enabled: true},
-	{Name: "联合早报", URL: "https://www.zaobao.com.sg/rss/news.xml", Lang: "zh", Enabled: true},
+	{Name: "联合早报", URL: "https://plink.anyfeeder.com/zaobao/realtime/world", Lang: "zh", Enabled: true},
+	{Name: "联合早报-中国", URL: "https://plink.anyfeeder.com/zaobao/realtime/china", Lang: "zh", Enabled: true},
 	// Candidate sources (disabled by default)
 	{Name: "香港电台", URL: "https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml", Lang: "zh"},
 	{Name: "CNN", URL: "http://rss.cnn.com/rss/edition.rss", Lang: "en"},
@@ -184,5 +185,5 @@ const (
 	DefaultMaxDigestItems   = 10
 	DefaultMaxPerCategory   = 3
 	DefaultClusterThreshold = 0.75
-	DefaultFileExpiryDays  = 2
+	DefaultFileExpiryDays   = 2
 )

@@ -34,7 +34,13 @@
   enabled: true
 
 - name: 联合早报
-  url: https://www.zaobao.com.sg/rss/news.xml
+  url: https://plink.anyfeeder.com/zaobao/realtime/world
+  lang: zh
+  use_proxy: false
+  enabled: true
+
+- name: 联合早报-中国
+  url: https://plink.anyfeeder.com/zaobao/realtime/china
   lang: zh
   use_proxy: false
   enabled: true

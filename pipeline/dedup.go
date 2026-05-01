@@ -108,7 +108,7 @@ func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []MergedNewsIt
 	for i, item := range items {
 		texts[i] = item.DisplayTitle + " " + item.Summary
 	}
-	vecs, err := p.Embedding.EmbedStrings(ctx, texts)
+	vecs, err := CachedEmbedStrings(ctx, p, texts)
 	if err != nil || len(vecs) != len(items) {
 		return
 	}
