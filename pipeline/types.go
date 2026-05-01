@@ -1,4 +1,5 @@
 package pipeline
+
 type NewsSummaryRequest struct {
 	Slot string // "00:00" / "12:00" / "18:00"
 }

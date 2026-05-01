@@ -56,12 +56,13 @@ func LoadConfig(configDir string) PipelineConfig {
 
 // NewsPipeline holds dependencies and builds the Eino Graph.
 type NewsPipeline struct {
-	ChatModel model.BaseChatModel // shared by Tag and Summary stages
-	Embedding EmbeddingClient     // OpenAI-compatible embedding for semantic dedup
-	ConfigDir string              // path to config/ directory (config.yaml, feeds.yaml, tagging_guide.md, etc.)
-	DataDir   string              // path to data/ directory (runtime output: push_history, tagged_cache, digest)
-	ProxyAddr string              // HTTP proxy for RSS feeds
-	Config    PipelineConfig      // configurable limits (loaded from config.yaml)
+	ChatModel   model.BaseChatModel // shared by Tag and Summary stages
+	Embedding   EmbeddingClient     // OpenAI-compatible embedding for semantic dedup
+	EmbedCache  *EmbeddingCache     // per-day persistent cache for embedding vectors
+	ConfigDir   string              // path to config/ directory (config.yaml, feeds.yaml, tagging_guide.md, etc.)
+	DataDir     string              // path to data/ directory (runtime output: push_history, tagged_cache, digest)
+	ProxyAddr   string              // HTTP proxy for RSS feeds
+	Config      PipelineConfig      // configurable limits (loaded from config.yaml)
 }
 
 // Getters with defaults
