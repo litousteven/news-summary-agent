@@ -19,21 +19,11 @@ const tagSystemPrompt = `你是一名国际新闻标注专家。你的任务是�
 
 1. 输出 JSON 数组，每个元素对应一条新闻
 2. 必填字段：id, display_title, category, topic_tags, region, interest_score, is_duplicate, selected, why_selected
-3. category 枚举值限定 7 个：战争与地缘 / 航空航天 / 军事装备 / AI与数码 / 新能源与汽车 / 全球经济 / 其他重要动态
+3. {categories}
 4. 同一事件的不同报道，display_title 应尽量保持一致，便于后续去重
 5. is_duplicate=true 的条目通常 selected=false
 6. display_title 是给用户看的标题，英文标题翻成自然中文
 7. interest_score 范围 0-10
-
-## 分类边界
-
-- 战争与地缘：战争、冲突、停火、袭击、外交摩擦、制裁、地区局势升级
-- 航空航天：火箭、卫星、探测器、航天计划、重大航空工业动态
-- 军事装备：导弹、舰艇、无人机、坦克、武器系统、军费、防务体系
-- AI与数码：AI 模型、芯片、半导体、互联网平台、消费电子、机器人
-- 新能源与汽车：电动车、电池、车企、充电、自动驾驶、能源转型
-- 全球经济：通胀、油价、贸易、粮食、金融市场、供应链
-- 其他重要动态：不属于以上但值得进入简报的重要国际新闻
 
 ## 兴趣评分
 

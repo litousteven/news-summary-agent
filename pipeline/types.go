@@ -125,22 +125,47 @@ type FeedSource struct {
 	Enabled  bool   `yaml:"enabled" json:"enabled"`
 }
 
-// Categories and their priority order
-var CategoryOrder = []string{
-	"战争与地缘",
-	"航空航天",
-	"军事装备",
-	"AI与数码",
-	"新能源与汽车",
-	"全球经济",
-	"其他重要动态",
+// CategoryDef represents a single category definition loaded from categories.json.
+type CategoryDef struct {
+	Name        string   `json:"name"`
+	Keywords    []string `json:"keywords"`
+	Boundary    string   `json:"boundary"`
+	NotBoundary string   `json:"not_boundary"`
 }
 
-var ValidCategories = map[string]bool{}
+// DefaultCategories is the embedded fallback when categories.json is not found.
+var DefaultCategories = []CategoryDef{
+	{Name: "战争与地缘", Keywords: []string{"战争", "冲突", "停火", "袭击", "外交摩擦", "制裁", "使馆事件", "地区局势升级"}, Boundary: "战争、冲突、停火、袭击、外交摩擦、制裁、使馆事件、地区局势升级", NotBoundary: "单纯介绍某种武器性能 → 更可能是\"军事装备\"；单纯航天任务/火箭发射 → \"航空航天\""},
+	{Name: "航空航天", Keywords: []string{"火箭", "卫星", "探测器", "航天计划", "航空工业", "民航"}, Boundary: "火箭、卫星、探测器、航天计划、重大航空工业动态、重大民航事件", NotBoundary: "军机参与作战、直升机伴飞、战斗飞行 → 通常不是\"航空航天\"主类"},
+	{Name: "军事装备", Keywords: []string{"导弹", "舰艇", "无人机", "坦克", "武器系统", "军费", "军工部署", "防务体系"}, Boundary: "导弹、舰艇、无人机、坦克、武器系统、军费、军工部署、防务体系", NotBoundary: "事件重点是\"冲突爆发、局势升级、外交回应\" → 更应归\"战争与地缘\""},
+	{Name: "AI与数码", Keywords: []string{"AI", "芯片", "半导体", "互联网平台", "消费电子", "机器人", "数码终端"}, Boundary: "AI 模型、芯片、半导体、互联网平台、消费电子、机器人、数码终端"},
+	{Name: "新能源与汽车", Keywords: []string{"电动车", "电池", "车企", "充电", "自动驾驶", "能源转型"}, Boundary: "电动车、电池、车企、充电、自动驾驶、能源转型"},
+	{Name: "全球经济", Keywords: []string{"通胀", "油价", "贸易", "粮食", "金融市场", "供应链", "产业链冲击"}, Boundary: "通胀、油价、贸易、粮食、金融市场、供应链、产业链冲击"},
+	{Name: "国内事务", Keywords: []string{"国内政治", "两岸关系", "反腐", "官员被查", "国内政策", "社会发展"}, Boundary: "中国内政、社会发展、政策动向、两岸关系等重要新闻", NotBoundary: "不要误分到\"战争与地缘\"或\"其他重要动态\""},
+	{Name: "其他重要动态", Keywords: []string{}, Boundary: "不属于以上分类，但仍值得进入简报的重要国际新闻"},
+}
+
+// CategoryOrder and ValidCategories are populated from the loaded categories.
+// They are initialized from DefaultCategories and may be overridden by
+// loadCategories() reading config/categories.json at runtime.
+var (
+	CategoryOrder  []string
+	ValidCategories map[string]bool
+	CategoryDefs   []CategoryDef
+)
 
 func init() {
-	for _, c := range CategoryOrder {
-		ValidCategories[c] = true
+	ReloadCategoryDefs(DefaultCategories)
+}
+
+// ReloadCategoryDefs rebuilds CategoryOrder and ValidCategories from a slice of CategoryDef.
+func ReloadCategoryDefs(defs []CategoryDef) {
+	CategoryDefs = defs
+	CategoryOrder = make([]string, len(defs))
+	ValidCategories = make(map[string]bool, len(defs))
+	for i, c := range defs {
+		CategoryOrder[i] = c.Name
+		ValidCategories[c.Name] = true
 	}
 }
 
