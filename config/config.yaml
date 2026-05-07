@@ -2,10 +2,10 @@
 # 修改此文件后无需重新编译，下次运行自动生效
 
 # 每个RSS源最大抓取条目数
-max_items_per_feed: 50
+max_items_per_feed: 30
 
 # 总共最大抓取条目数
-max_total_items: 100
+max_total_items: 300
 
 # 简报最大入选条目数
 max_digest_items: 10

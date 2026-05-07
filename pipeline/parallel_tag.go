@@ -108,7 +108,7 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 		wg.Add(1)
 		go func(idx int, b []RawNewsItem) {
 			defer wg.Done()
-			tagged, err := p.tagOneBatch(ctx, b, guide, examples, rawByID)
+			tagged, err := p.tagBatchWithFallback(ctx, b, guide, examples, rawByID)
 			results[idx] = batchResult{items: tagged, err: err, index: idx}
 		}(i, batch)
 	}
@@ -125,9 +125,34 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	}
 
 	if len(allTagged) == 0 {
-		return nil, fmt.Errorf("all %d tag batches failed", len(batches))
+		log.Printf("[ParallelTag] all %d tag batches failed or were dropped; continuing with no newly tagged items", len(batches))
+		return nil, nil
 	}
 
+	return allTagged, nil
+}
+
+func (p *NewsPipeline) tagBatchWithFallback(ctx context.Context, batch []RawNewsItem, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
+	tagged, err := p.tagOneBatch(ctx, batch, guide, examples, rawByID)
+	if err == nil {
+		return tagged, nil
+	}
+
+	if len(batch) == 1 {
+		log.Printf("[ParallelTag] 放弃单条新闻：id=%s title=%q，原因：%v", batch[0].ID, batch[0].Title, err)
+		return nil, nil
+	}
+
+	log.Printf("[ParallelTag] 批次标注失败，尝试逐条重试: %v", err)
+	var allTagged []TaggedNewsItem
+	for _, item := range batch {
+		single, singleErr := p.tagOneBatch(ctx, []RawNewsItem{item}, guide, examples, rawByID)
+		if singleErr != nil {
+			log.Printf("[ParallelTag] 单条新闻标注失败并已丢弃：id=%s title=%q，原因：%v", item.ID, item.Title, singleErr)
+			continue
+		}
+		allTagged = append(allTagged, single...)
+	}
 	return allTagged, nil
 }
 
