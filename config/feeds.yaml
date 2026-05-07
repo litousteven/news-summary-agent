@@ -51,7 +51,7 @@
   url: https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml
   lang: zh
   use_proxy: false
-  enabled: false
+  enabled: true
 
 - name: CNN
   url: http://rss.cnn.com/rss/edition.rss
@@ -75,13 +75,13 @@
   url: https://abcnews.go.com/abcnews/topstories
   lang: en
   use_proxy: true
-  enabled: false
+  enabled: true
 
 - name: FOX News
   url: https://moxie.foxnews.com/google-publisher/world.xml
   lang: en
   use_proxy: true
-  enabled: false
+  enabled: true
 
 - name: The Guardian
   url: https://www.theguardian.com/world/rss
@@ -93,7 +93,7 @@
   url: https://www.ft.com/rss/home
   lang: en
   use_proxy: true
-  enabled: false
+  enabled: true
 
 - name: The Independent
   url: https://www.independent.co.uk/rss

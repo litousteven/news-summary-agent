@@ -256,6 +256,28 @@ func TestParseTagResult_DefaultsDisplayTitleToTitle(t *testing.T) {
 	}
 }
 
+func TestTagNewItems_BatchFailFallbackDropsBadItem(t *testing.T) {
+	p := &NewsPipeline{
+		ChatModel: &mockChatModelBatchFallback{},
+	}
+
+	items := []RawNewsItem{
+		{ID: "item-1", Source: "BBC", Title: "英国经济下行", Summary: "英国央行发布数据", Link: "https://bbc.co.uk/1", PublishedAt: "2026-05-07T10:00:00Z", Lang: "en"},
+		{ID: "item-2", Source: "NPR", Title: "美国经济继续反弹", Summary: "最新就业数据好于预期", Link: "https://npr.org/2", PublishedAt: "2026-05-07T09:00:00Z", Lang: "en"},
+	}
+
+	tagged, err := p.tagNewItems(context.Background(), items)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(tagged) != 2 {
+		t.Fatalf("expected 2 tagged items after fallback, got %d", len(tagged))
+	}
+	if tagged[0].ID != "item-1" || tagged[1].ID != "item-2" {
+		t.Errorf("unexpected tagged item IDs: %+v", tagged)
+	}
+}
+
 // --- P0: recordHistory writes per-item records with embeddings ---
 
 func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
@@ -1231,6 +1253,45 @@ func (m *mockChatModel) Generate(ctx context.Context, input []*schema.Message, o
 
 func (m *mockChatModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+type mockChatModelBatchFallback struct{}
+
+func (m *mockChatModelBatchFallback) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	content := "[]"
+	if len(input) > 1 {
+		body := input[1].Content
+		if strings.Contains(body, "### [2]") {
+			return nil, fmt.Errorf("batch prompt failed")
+		}
+		if strings.Contains(body, "### [1]") {
+			// Return a valid JSON for the single item
+			return &schema.Message{Content: fmt.Sprintf("[{\"id\":\"%s\",\"display_title\":\"%s\",\"category\":\"全球经济\",\"topic_tags\":[\"经济\"],\"region\":\"全球\",\"interest_score\":6,\"is_duplicate\":false,\"selected\":true,\"why_selected\":\"测试\"}]", extractIDFromPrompt(body), extractTitleFromPrompt(body))}, nil
+		}
+	}
+	return &schema.Message{Content: content}, nil
+}
+
+func (m *mockChatModelBatchFallback) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func extractIDFromPrompt(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "- ID:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "- ID:"))
+		}
+	}
+	return "unknown"
+}
+
+func extractTitleFromPrompt(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "### [1]") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "### [1]"))
+		}
+	}
+	return "unknown"
 }
 
 func loadHistoryRecords(t *testing.T, dataDir string) []PushHistoryRecord {
