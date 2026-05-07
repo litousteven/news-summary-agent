@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 )
@@ -20,6 +22,10 @@ func (p *NewsPipeline) formatTagPrompt(ctx context.Context, items []RawNewsItem)
 		sb.WriteString(fmt.Sprintf("- 链接: %s\n\n", item.Link))
 	}
 
+	// Load categories and build the categories section of the prompt
+	categories, _ := p.loadCategories()
+	categoriesText := formatCategoriesForPrompt(categories)
+
 	// Load tagging guide
 	guide, err := p.loadTaggingGuide()
 	if err != nil {
@@ -34,10 +40,72 @@ func (p *NewsPipeline) formatTagPrompt(ctx context.Context, items []RawNewsItem)
 
 	return map[string]any{
 		"news_items":       sb.String(),
+		"categories":       categoriesText,
 		"tagging_guide":    guide,
 		"tagging_examples": examples,
 		"total_count":      fmt.Sprintf("%d", len(items)),
 	}, nil
+}
+
+// formatCategoriesForPrompt renders the category list and boundaries as text for the LLM prompt.
+func formatCategoriesForPrompt(defs []CategoryDef) string {
+	var sb strings.Builder
+	// Category enum
+	sb.WriteString("category 枚举值限定 " + fmt.Sprintf("%d", len(defs)) + " 个：")
+	names := make([]string, len(defs))
+	for i, c := range defs {
+		names[i] = c.Name
+	}
+	sb.WriteString(strings.Join(names, " / "))
+	sb.WriteString("\n\n")
+
+	// Category boundaries
+	sb.WriteString("## 分类边界\n\n")
+	for _, c := range defs {
+		sb.WriteString("### " + c.Name + "\n")
+		sb.WriteString("适合：\n- " + c.Boundary + "\n")
+		if c.NotBoundary != "" {
+			sb.WriteString("\n不要误分到这里的情况：\n- " + c.NotBoundary + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// loadCategories reads the categories JSON file and updates the global category state.
+// If the file does not exist, it is created from DefaultCategories (template).
+func (p *NewsPipeline) loadCategories() ([]CategoryDef, error) {
+	path := p.ConfigDir + "/categories.json"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// First run: write DefaultCategories as the initial categories.json
+		if err := p.initCategoriesFile(path); err != nil {
+			log.Printf("[loadCategories] 初始化 categories.json 失败: %v, 使用内置默认值", err)
+		}
+		return DefaultCategories, nil
+	}
+	var defs []CategoryDef
+	if err := json.Unmarshal(data, &defs); err != nil {
+		return DefaultCategories, nil
+	}
+	if len(defs) == 0 {
+		return DefaultCategories, nil
+	}
+	ReloadCategoryDefs(defs)
+	return defs, nil
+}
+
+// initCategoriesFile writes the default categories template to the given path.
+func (p *NewsPipeline) initCategoriesFile(path string) error {
+	data, err := json.MarshalIndent(DefaultCategories, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal default categories: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("write categories.json: %w", err)
+	}
+	log.Printf("[loadCategories] 已从模板创建 %s", path)
+	return nil
 }
 
 // loadTaggingGuide reads the tagging guide markdown file.
@@ -63,16 +131,9 @@ func (p *NewsPipeline) loadTaggingExamples() (string, error) {
 }
 
 // Embedded defaults (used when data files are not available)
+// Note: category definitions come from categories.json / DefaultCategories,
+// not from the tagging guide. The guide only contains non-category rules.
 const defaultTaggingGuide = `## 标注规范 v3
-
-### 分类枚举（只能选一个）
-- 战争与地缘
-- 航空航天
-- 军事装备
-- AI与数码
-- 新能源与汽车
-- 全球经济
-- 其他重要动态
 
 ### 重复项判定
 - 主项：is_duplicate=false, selected=true

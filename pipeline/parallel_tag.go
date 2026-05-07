@@ -76,7 +76,9 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 
 // tagNewItems performs LLM tagging on items that are not in the cache.
 func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]TaggedNewsItem, error) {
-	// Load guide and examples once (shared across batches)
+	// Load categories, guide and examples once (shared across batches)
+	categories, _ := p.loadCategories()
+	categoriesText := formatCategoriesForPrompt(categories)
 	guide, err := p.loadTaggingGuide()
 	if err != nil {
 		return nil, fmt.Errorf("load tagging guide: %w", err)
@@ -108,7 +110,7 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 		wg.Add(1)
 		go func(idx int, b []RawNewsItem) {
 			defer wg.Done()
-			tagged, err := p.tagBatchWithFallback(ctx, b, guide, examples, rawByID)
+			tagged, err := p.tagBatchWithFallback(ctx, b, categoriesText, guide, examples, rawByID)
 			results[idx] = batchResult{items: tagged, err: err, index: idx}
 		}(i, batch)
 	}
@@ -132,8 +134,8 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	return allTagged, nil
 }
 
-func (p *NewsPipeline) tagBatchWithFallback(ctx context.Context, batch []RawNewsItem, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
-	tagged, err := p.tagOneBatch(ctx, batch, guide, examples, rawByID)
+func (p *NewsPipeline) tagBatchWithFallback(ctx context.Context, batch []RawNewsItem, categoriesText, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
+	tagged, err := p.tagOneBatch(ctx, batch, categoriesText, guide, examples, rawByID)
 	if err == nil {
 		return tagged, nil
 	}
@@ -146,7 +148,7 @@ func (p *NewsPipeline) tagBatchWithFallback(ctx context.Context, batch []RawNews
 	log.Printf("[ParallelTag] 批次标注失败，尝试逐条重试: %v", err)
 	var allTagged []TaggedNewsItem
 	for _, item := range batch {
-		single, singleErr := p.tagOneBatch(ctx, []RawNewsItem{item}, guide, examples, rawByID)
+		single, singleErr := p.tagOneBatch(ctx, []RawNewsItem{item}, categoriesText, guide, examples, rawByID)
 		if singleErr != nil {
 			log.Printf("[ParallelTag] 单条新闻标注失败并已丢弃：id=%s title=%q，原因：%v", item.ID, item.Title, singleErr)
 			continue
@@ -204,9 +206,9 @@ func (p *NewsPipeline) appendTagCache(items []TaggedNewsItem) error {
 }
 
 // tagOneBatch formats a prompt, calls the LLM, and parses the result for one batch.
-func (p *NewsPipeline) tagOneBatch(ctx context.Context, batch []RawNewsItem, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
+func (p *NewsPipeline) tagOneBatch(ctx context.Context, batch []RawNewsItem, categoriesText, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
 	// 1. Format prompt variables
-	vars, err := p.formatBatchTagPrompt(batch, guide, examples)
+	vars, err := p.formatBatchTagPrompt(batch, categoriesText, guide, examples)
 	if err != nil {
 		return nil, fmt.Errorf("format prompt: %w", err)
 	}
@@ -240,7 +242,7 @@ func (p *NewsPipeline) tagOneBatch(ctx context.Context, batch []RawNewsItem, gui
 const TagBatchSize = 15
 
 // formatBatchTagPrompt builds template variables for one batch.
-func (p *NewsPipeline) formatBatchTagPrompt(batch []RawNewsItem, guide, examples string) (map[string]any, error) {
+func (p *NewsPipeline) formatBatchTagPrompt(batch []RawNewsItem, categoriesText, guide, examples string) (map[string]any, error) {
 	var sb strings.Builder
 	for i, item := range batch {
 		sb.WriteString(fmt.Sprintf("### [%d] %s\n", i+1, item.Title))
@@ -253,6 +255,7 @@ func (p *NewsPipeline) formatBatchTagPrompt(batch []RawNewsItem, guide, examples
 
 	return map[string]any{
 		"news_items":       sb.String(),
+		"categories":       categoriesText,
 		"tagging_guide":    guide,
 		"tagging_examples": examples,
 		"total_count":      fmt.Sprintf("%d", len(batch)),

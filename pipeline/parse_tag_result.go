@@ -185,11 +185,23 @@ func parseBool(raw json.RawMessage, defaultVal bool) bool {
 }
 
 // normalizeCategory maps the category to one of the valid enum values.
+// First checks exact match, then uses keywords from CategoryDefs for fuzzy matching.
 func normalizeCategory(cat string) string {
 	cat = strings.TrimSpace(cat)
 	if ValidCategories[cat] {
 		return cat
 	}
+
+	// Fuzzy match using keywords from dynamically loaded categories
+	for _, c := range CategoryDefs {
+		for _, kw := range c.Keywords {
+			if strings.Contains(cat, kw) {
+				return c.Name
+			}
+		}
+	}
+
+	// Hardcoded fallback for common LLM output variations
 	switch {
 	case strings.Contains(cat, "战争") || strings.Contains(cat, "地缘"):
 		return "战争与地缘"
@@ -203,6 +215,8 @@ func normalizeCategory(cat string) string {
 		return "新能源与汽车"
 	case strings.Contains(cat, "经济") || strings.Contains(cat, "金融") || strings.Contains(cat, "贸易"):
 		return "全球经济"
+	case strings.Contains(cat, "国内") || strings.Contains(cat, "内政") || strings.Contains(cat, "两岸"):
+		return "国内事务"
 	default:
 		return "其他重要动态"
 	}
