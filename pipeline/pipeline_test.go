@@ -256,9 +256,9 @@ func TestParseTagResult_DefaultsDisplayTitleToTitle(t *testing.T) {
 	}
 }
 
-func TestTagNewItems_BatchFailFallbackDropsBadItem(t *testing.T) {
+func TestTagNewItems_FailedBatchDropped(t *testing.T) {
 	p := &NewsPipeline{
-		ChatModel: &mockChatModelBatchFallback{},
+		ChatModel: &mockChatModelTagDrop{},
 	}
 
 	items := []RawNewsItem{
@@ -270,11 +270,9 @@ func TestTagNewItems_BatchFailFallbackDropsBadItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if len(tagged) != 2 {
-		t.Fatalf("expected 2 tagged items after fallback, got %d", len(tagged))
-	}
-	if tagged[0].ID != "item-1" || tagged[1].ID != "item-2" {
-		t.Errorf("unexpected tagged item IDs: %+v", tagged)
+	// The mock always fails, so all items should be dropped
+	if len(tagged) != 0 {
+		t.Fatalf("expected 0 tagged items (all batches failed), got %d", len(tagged))
 	}
 }
 
@@ -1255,43 +1253,15 @@ func (m *mockChatModel) Stream(ctx context.Context, input []*schema.Message, opt
 	return nil, fmt.Errorf("not implemented")
 }
 
-type mockChatModelBatchFallback struct{}
+// mockChatModelTagDrop always fails — used to test that failed batches are dropped.
+type mockChatModelTagDrop struct{}
 
-func (m *mockChatModelBatchFallback) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	content := "[]"
-	if len(input) > 1 {
-		body := input[1].Content
-		if strings.Contains(body, "### [2]") {
-			return nil, fmt.Errorf("batch prompt failed")
-		}
-		if strings.Contains(body, "### [1]") {
-			// Return a valid JSON for the single item
-			return &schema.Message{Content: fmt.Sprintf("[{\"id\":\"%s\",\"display_title\":\"%s\",\"category\":\"全球经济\",\"topic_tags\":[\"经济\"],\"region\":\"全球\",\"interest_score\":6,\"is_duplicate\":false,\"selected\":true,\"why_selected\":\"测试\"}]", extractIDFromPrompt(body), extractTitleFromPrompt(body))}, nil
-		}
-	}
-	return &schema.Message{Content: content}, nil
+func (m *mockChatModelTagDrop) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return nil, fmt.Errorf("LLM unavailable")
 }
 
-func (m *mockChatModelBatchFallback) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+func (m *mockChatModelTagDrop) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
 	return nil, fmt.Errorf("not implemented")
-}
-
-func extractIDFromPrompt(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "- ID:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "- ID:"))
-		}
-	}
-	return "unknown"
-}
-
-func extractTitleFromPrompt(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "### [1]") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "### [1]"))
-		}
-	}
-	return "unknown"
 }
 
 func loadHistoryRecords(t *testing.T, dataDir string) []PushHistoryRecord {

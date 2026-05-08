@@ -73,12 +73,13 @@ func formatCategoriesForPrompt(defs []CategoryDef) string {
 }
 
 // loadCategories reads the categories JSON file and updates the global category state.
-// If the file does not exist, it is created from DefaultCategories (template).
+// If the file does not exist, it is created by copying categories.json.template
+// (falling back to DefaultCategories if the template is also missing).
 func (p *NewsPipeline) loadCategories() ([]CategoryDef, error) {
 	path := p.ConfigDir + "/categories.json"
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// First run: write DefaultCategories as the initial categories.json
+		// First run: copy from template
 		if err := p.initCategoriesFile(path); err != nil {
 			log.Printf("[loadCategories] 初始化 categories.json 失败: %v, 使用内置默认值", err)
 		}
@@ -95,8 +96,19 @@ func (p *NewsPipeline) loadCategories() ([]CategoryDef, error) {
 	return defs, nil
 }
 
-// initCategoriesFile writes the default categories template to the given path.
+// initCategoriesFile copies categories.json.template to categories.json.
+// Falls back to writing DefaultCategories if the template file is missing.
 func (p *NewsPipeline) initCategoriesFile(path string) error {
+	tplPath := p.ConfigDir + "/categories.json.template"
+	tplData, err := os.ReadFile(tplPath)
+	if err == nil {
+		if err := os.WriteFile(path, tplData, 0644); err != nil {
+			return fmt.Errorf("copy template: %w", err)
+		}
+		log.Printf("[loadCategories] 已从 %s 创建 categories.json", tplPath)
+		return nil
+	}
+	// Template not found, write embedded defaults
 	data, err := json.MarshalIndent(DefaultCategories, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal default categories: %w", err)
