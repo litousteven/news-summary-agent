@@ -114,7 +114,7 @@ go run . -config ./config -data ./data
 
 ### 分类体系
 
-新闻会被归入以下分类（可在 `config/tagging_guide.md` 中调整）：
+新闻会被归入以下分类（由 `config/categories.json` 管理，首次运行自动从模板创建）：
 
 - 战争与地缘
 - 航空航天
@@ -122,7 +122,10 @@ go run . -config ./config -data ./data
 - AI与数码
 - 新能源与汽车
 - 全球经济
+- 国内事务
 - 其他重要动态
+
+分类定义包含 `keywords`（用于模糊匹配）、`boundary`（适合归入的说明）和 `not_boundary`（不适合归入的情况说明）。`UpdateTaggingGuide` 节点会根据新闻数据自动分析并直接增删 `categories.json` 中的分类。
 
 ### 项目结构
 
@@ -131,6 +134,7 @@ go run . -config ./config -data ./data
 ├── config/                  # 配置文件（版本控制）
 │   ├── config.yaml          # 运行参数
 │   ├── feeds.yaml           # RSS 源
+│   ├── categories.json      # 分类定义（自动初始化）
 │   ├── tagging_guide.md     # 标注规范
 │   └── tagging_examples.csv # 标注示例
 ├── data/                    # 运行时产出（.gitignore）
@@ -164,12 +168,23 @@ START
   │  []RawNewsItem
   ▼
 [ParallelTag] ─── 分批并行标注（带缓存）
+  │  ┌─────────────────────────────────┐
+  │  │ TagSubGraph (eino SubGraph)     │
+  │  │                                 │
+  │  │  TagTemplate → TagChatModel     │
+  │  │       → ParseTagResult         │
+  │  │                                 │
+  │  │  每批独立执行，失败直接丢弃     │
+  │  └─────────────────────────────────┘
   │  []TaggedNewsItem
   ▼
 [MergeHistory] ─── 与推送历史去重（链接→标题→向量→LLM）
   │  []MergedNewsItem
   ▼
 [BuildDigest] ─── 分类/排序/限额 + 批内语义去重
+  │  *DigestData
+  ▼
+[TranslateItems] ─── 翻译外文新闻
   │  *DigestData
   ▼
 [FormatSummaryPrompt] ─── 拼装摘要模板变量
@@ -199,6 +214,8 @@ END → *NewsSummaryResult
 #### ParallelTag
 
 将新闻分批（每批 15 条）并行调用 LLM 标注。每条新闻生成：display_title、category、topic_tags、region、interest_score、is_duplicate、selected 等字段。
+
+标注通过 eino SubGraph（TagSubGraph）执行，内部流程为：TagTemplate → TagChatModel → ParseTagResult。SubGraph 提供节点级错误追踪和回调支持。批次失败时直接丢弃对应新闻，不重试。
 
 标注结果按天缓存到 `tagged_cache_YYYYMMDD.jsonl`，下次运行时相同链接的新闻直接命中缓存，避免重复标注。
 
@@ -230,7 +247,7 @@ END → *NewsSummaryResult
 
 #### UpdateTaggingGuide
 
-分析本次标注的新闻分类和 topic_tags 分布，调用 LLM 判断是否需要新增/拆分/合并分类。建议以"动态调整记录"追加到 `tagging_guide.md` 末尾，供人工审核。此节点为非关键路径，失败不影响简报输出。
+分析本次标注的新闻分类和 topic_tags 分布，调用 LLM 判断是否需要新增/删除/拆分/合并分类。LLM 输出 JSON 格式的调整方案，直接修改 `config/categories.json`，无需人工审核。此节点为非关键路径，失败不影响简报输出。
 
 ### 数据结构
 

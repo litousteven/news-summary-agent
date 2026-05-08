@@ -10,11 +10,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
 // parallelTagItems splits raw news items into batches, tags each batch
-// concurrently via the LLM, and merges the results.
+// concurrently via the tag sub-graph, and merges the results.
 // Uses a per-day tag cache to avoid re-tagging already processed items.
 func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem) ([]TaggedNewsItem, error) {
 	if len(items) == 0 {
@@ -75,8 +76,16 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 }
 
 // tagNewItems performs LLM tagging on items that are not in the cache.
+// It splits items into batches and runs the tag sub-graph concurrently for each batch.
+// Failed batches are logged and their items are dropped (no retry).
 func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]TaggedNewsItem, error) {
-	// Load categories, guide and examples once (shared across batches)
+	// Build the tag sub-graph once (shared across all batches)
+	tagGraph, err := p.buildTagSubGraph(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("build tag sub-graph: %w", err)
+	}
+
+	// Load prompt content once (shared across batches)
 	categories, _ := p.loadCategories()
 	categoriesText := formatCategoriesForPrompt(categories)
 	guide, err := p.loadTaggingGuide()
@@ -86,12 +95,6 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	examples, err := p.loadTaggingExamples()
 	if err != nil {
 		return nil, fmt.Errorf("load tagging examples: %w", err)
-	}
-
-	// Build index of raw items by ID for merging
-	rawByID := make(map[string]RawNewsItem, len(items))
-	for _, item := range items {
-		rawByID[item.ID] = item
 	}
 
 	// Split into batches
@@ -110,51 +113,32 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 		wg.Add(1)
 		go func(idx int, b []RawNewsItem) {
 			defer wg.Done()
-			tagged, err := p.tagBatchWithFallback(ctx, b, categoriesText, guide, examples, rawByID)
+			// Format prompt variables for this batch
+			vars := p.formatBatchTagPromptVars(b, categoriesText, guide, examples)
+			// Run the tag sub-graph
+			tagged, err := tagGraph.Invoke(ctx, vars)
+			if err != nil {
+				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃）: %v", idx+1, len(batches), err)
+			}
 			results[idx] = batchResult{items: tagged, err: err, index: idx}
 		}(i, batch)
 	}
 	wg.Wait()
 
-	// Merge results in order
+	// Merge results in order (failed batches are skipped)
 	var allTagged []TaggedNewsItem
-	for i, r := range results {
+	for _, r := range results {
 		if r.err != nil {
-			log.Printf("[ParallelTag] batch %d/%d failed: %v", i+1, len(batches), r.err)
 			continue
 		}
 		allTagged = append(allTagged, r.items...)
 	}
 
 	if len(allTagged) == 0 {
-		log.Printf("[ParallelTag] all %d tag batches failed or were dropped; continuing with no newly tagged items", len(batches))
+		log.Printf("[ParallelTag] 所有 %d 个批次均失败；继续处理，无新标注项", len(batches))
 		return nil, nil
 	}
 
-	return allTagged, nil
-}
-
-func (p *NewsPipeline) tagBatchWithFallback(ctx context.Context, batch []RawNewsItem, categoriesText, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
-	tagged, err := p.tagOneBatch(ctx, batch, categoriesText, guide, examples, rawByID)
-	if err == nil {
-		return tagged, nil
-	}
-
-	if len(batch) == 1 {
-		log.Printf("[ParallelTag] 放弃单条新闻：id=%s title=%q，原因：%v", batch[0].ID, batch[0].Title, err)
-		return nil, nil
-	}
-
-	log.Printf("[ParallelTag] 批次标注失败，尝试逐条重试: %v", err)
-	var allTagged []TaggedNewsItem
-	for _, item := range batch {
-		single, singleErr := p.tagOneBatch(ctx, []RawNewsItem{item}, categoriesText, guide, examples, rawByID)
-		if singleErr != nil {
-			log.Printf("[ParallelTag] 单条新闻标注失败并已丢弃：id=%s title=%q，原因：%v", item.ID, item.Title, singleErr)
-			continue
-		}
-		allTagged = append(allTagged, single...)
-	}
 	return allTagged, nil
 }
 
@@ -205,44 +189,11 @@ func (p *NewsPipeline) appendTagCache(items []TaggedNewsItem) error {
 	return nil
 }
 
-// tagOneBatch formats a prompt, calls the LLM, and parses the result for one batch.
-func (p *NewsPipeline) tagOneBatch(ctx context.Context, batch []RawNewsItem, categoriesText, guide, examples string, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
-	// 1. Format prompt variables
-	vars, err := p.formatBatchTagPrompt(batch, categoriesText, guide, examples)
-	if err != nil {
-		return nil, fmt.Errorf("format prompt: %w", err)
-	}
-
-	// 2. Render template
-	tagTpl, err := p.newTagChatTemplate()
-	if err != nil {
-		return nil, fmt.Errorf("create template: %w", err)
-	}
-	messages, err := tagTpl.Format(ctx, vars)
-	if err != nil {
-		return nil, fmt.Errorf("render template: %w", err)
-	}
-
-	// 3. Call LLM
-	resp, err := p.ChatModel.Generate(ctx, messages)
-	if err != nil {
-		return nil, fmt.Errorf("LLM call: %w", err)
-	}
-
-	// 4. Parse result
-	tagged, err := parseTagResultFromMessage(resp, rawByID)
-	if err != nil {
-		return nil, fmt.Errorf("parse result: %w", err)
-	}
-
-	return tagged, nil
-}
-
 // TagBatchSize controls how many news items are sent to the LLM per batch.
 const TagBatchSize = 15
 
-// formatBatchTagPrompt builds template variables for one batch.
-func (p *NewsPipeline) formatBatchTagPrompt(batch []RawNewsItem, categoriesText, guide, examples string) (map[string]any, error) {
+// formatBatchTagPromptVars builds template variables for one batch.
+func (p *NewsPipeline) formatBatchTagPromptVars(batch []RawNewsItem, categoriesText, guide, examples string) map[string]any {
 	var sb strings.Builder
 	for i, item := range batch {
 		sb.WriteString(fmt.Sprintf("### [%d] %s\n", i+1, item.Title))
@@ -259,7 +210,7 @@ func (p *NewsPipeline) formatBatchTagPrompt(batch []RawNewsItem, categoriesText,
 		"tagging_guide":    guide,
 		"tagging_examples": examples,
 		"total_count":      fmt.Sprintf("%d", len(batch)),
-	}, nil
+	}
 }
 
 // parseTagResultFromMessage parses LLM output into TaggedNewsItems, merging raw fields.
@@ -336,3 +287,6 @@ func splitBatches(items []RawNewsItem, batchSize int) [][]RawNewsItem {
 	}
 	return batches
 }
+
+// Ensure tagSubGraphState is used (compile check for unused import)
+var _ = compose.ProcessState[*tagSubGraphState]
