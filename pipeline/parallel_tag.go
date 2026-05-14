@@ -76,8 +76,9 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 }
 
 // tagNewItems performs LLM tagging on items that are not in the cache.
-// It splits items into batches and runs the tag sub-graph concurrently for each batch.
-// Failed batches are logged and their items are dropped (no retry).
+// It splits items into batches and runs the tag sub-graph concurrently for each batch
+// with a concurrency limiter, per-batch timeout, and retry with exponential backoff.
+// Failed batches after all retries are logged and their items are dropped.
 func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]TaggedNewsItem, error) {
 	// Build the tag sub-graph once (shared across all batches)
 	tagGraph, err := p.buildTagSubGraph(ctx)
@@ -108,19 +109,53 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 
 	results := make([]batchResult, len(batches))
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, MaxConcurrentTagBatches) // concurrency limiter
 
 	for i, batch := range batches {
 		wg.Add(1)
 		go func(idx int, b []RawNewsItem) {
 			defer wg.Done()
-			// Format prompt variables for this batch
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
 			vars := p.formatBatchTagPromptVars(b, categoriesText, guide, examples)
-			// Run the tag sub-graph
-			tagged, err := tagGraph.Invoke(ctx, vars)
-			if err != nil {
-				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃）: %v", idx+1, len(batches), err)
+
+			// Retry loop with exponential backoff
+			var tagged []TaggedNewsItem
+			var lastErr error
+		retryLoop:
+			for attempt := 0; attempt <= MaxTagRetries; attempt++ {
+				if attempt > 0 {
+					backoff := time.Duration(1<<(attempt-1)) * TagRetryBaseDelay
+					log.Printf("[ParallelTag] batch %d/%d 第 %d 次重试（等待 %v）...",
+						idx+1, len(batches), attempt, backoff)
+					select {
+					case <-ctx.Done():
+						lastErr = ctx.Err()
+						break retryLoop
+					case <-time.After(backoff):
+					}
+				}
+
+				// Create a per-attempt timeout context
+				batchCtx, cancel := context.WithTimeout(ctx, TagBatchTimeout)
+				tagged, lastErr = tagGraph.Invoke(batchCtx, vars)
+				cancel()
+
+				if lastErr == nil {
+					break // success
+				}
+				log.Printf("[ParallelTag] batch %d/%d 第 %d 次尝试失败: %v",
+					idx+1, len(batches), attempt+1, lastErr)
 			}
-			results[idx] = batchResult{items: tagged, err: err, index: idx}
+
+			if lastErr != nil {
+				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃，重试 %d 次后仍失败）: %v",
+					idx+1, len(batches), MaxTagRetries, lastErr)
+			}
+			results[idx] = batchResult{items: tagged, err: lastErr, index: idx}
 		}(i, batch)
 	}
 	wg.Wait()
@@ -189,8 +224,25 @@ func (p *NewsPipeline) appendTagCache(items []TaggedNewsItem) error {
 	return nil
 }
 
-// TagBatchSize controls how many news items are sent to the LLM per batch.
-const TagBatchSize = 15
+// Tag batch processing constants.
+const (
+	// TagBatchSize controls how many news items are sent to the LLM per batch.
+	TagBatchSize = 15
+
+	// MaxConcurrentTagBatches limits the number of batches processed in parallel
+	// to avoid overwhelming the LLM API with too many concurrent requests.
+	MaxConcurrentTagBatches = 3
+
+	// MaxTagRetries is the maximum number of retry attempts for a failed batch.
+	// Each retry uses exponential backoff starting from TagRetryBaseDelay.
+	MaxTagRetries = 2
+
+	// TagRetryBaseDelay is the base delay for exponential backoff on retry.
+	TagRetryBaseDelay = 3 * time.Second
+
+	// TagBatchTimeout is the per-batch timeout applied to each tag sub-graph invocation.
+	TagBatchTimeout = 120 * time.Second
+)
 
 // formatBatchTagPromptVars builds template variables for one batch.
 func (p *NewsPipeline) formatBatchTagPromptVars(batch []RawNewsItem, categoriesText, guide, examples string) map[string]any {
