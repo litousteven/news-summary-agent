@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -25,12 +26,21 @@ func main() {
 
 	_ = godotenv.Load()
 
+	// Setup log: both stderr and daily-rotated file under log/
+	setupLogging()
+
 	ctx := context.Background()
 
-	// ChatModel — 标注和摘要共用
-	chatModel, err := createChatModel(ctx)
+	// ChatModel — 标注和摘要共用（非 JSON 模式）
+	chatModel, err := createChatModel(ctx, false)
 	if err != nil {
 		log.Fatalf("创建ChatModel失败: %v", err)
+	}
+
+	// TagChatModel — 标注专用（JSON 强制模式）
+	tagChatModel, err := createChatModel(ctx, true)
+	if err != nil {
+		log.Fatalf("创建TagChatModel失败: %v", err)
 	}
 
 	// Embedding — OpenAI兼容的 Embedding 模型
@@ -57,13 +67,14 @@ func main() {
 	embedCache.Load()
 
 	p := &pipeline.NewsPipeline{
-		ChatModel:  chatModel,
-		Embedding:  embeddingClient,
-		EmbedCache: embedCache,
-		ConfigDir:  absConfigDir,
-		DataDir:    absDataDir,
-		ProxyAddr:  os.Getenv("PROXY_ADDR"),
-		Config:     cfg,
+		ChatModel:    chatModel,
+		TagChatModel: tagChatModel,
+		Embedding:    embeddingClient,
+		EmbedCache:   embedCache,
+		ConfigDir:    absConfigDir,
+		DataDir:      absDataDir,
+		ProxyAddr:    os.Getenv("PROXY_ADDR"),
+		Config:       cfg,
 	}
 
 	// Cleanup expired data files before pipeline run
@@ -80,6 +91,11 @@ func main() {
 	fmt.Println(result.Message)
 	fmt.Printf("\n统计: 抓取=%d, 标注=%d, 入选=%d\n",
 		result.Stats.TotalFetched, result.Stats.TotalTagged, result.Stats.TotalSelected)
+	if result.Stats.TaggingFailed > 0 {
+		pct := float64(result.Stats.TaggingFailed) / float64(result.Stats.TotalFetched) * 100
+		fmt.Printf("标记: 标注失败 %d 条 (%.0f%%), 流程已忽略并继续\n",
+			result.Stats.TaggingFailed, pct)
+	}
 
 	// Save embedding cache
 	embedCache.Save()
@@ -93,7 +109,8 @@ func main() {
 }
 
 // createChatModel creates a single OpenAI-compatible ChatModel.
-func createChatModel(ctx context.Context) (model.BaseChatModel, error) {
+// jsonMode=true forces response_format to json_object.
+func createChatModel(ctx context.Context, jsonMode bool) (model.BaseChatModel, error) {
 	apiKey := os.Getenv("CHAT_MODEL_API_KEY")
 	baseURL := os.Getenv("CHAT_MODEL_BASE_URL")
 	modelName := os.Getenv("CHAT_MODEL_NAME")
@@ -106,12 +123,18 @@ func createChatModel(ctx context.Context) (model.BaseChatModel, error) {
 	}
 
 	maxTokens := 16384
-	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+	cfg := &openai.ChatModelConfig{
 		BaseURL:   baseURL,
 		Model:     modelName,
 		APIKey:    apiKey,
 		MaxTokens: &maxTokens,
-	})
+	}
+	if jsonMode {
+		cfg.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: "json_object",
+		}
+	}
+	chatModel, err := openai.NewChatModel(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create chat model: %w", err)
 	}
@@ -175,4 +198,30 @@ func writeDigestMD(dataDir string, result *pipeline.NewsSummaryResult) error {
 	}
 	log.Printf("简报已写入: %s", path)
 	return nil
+}
+
+// setupLogging configures log output to both stderr and a daily-rotated file under log/.
+func setupLogging() {
+	absLogDir, err := filepath.Abs("./log")
+	if err != nil {
+		log.Printf("解析log目录路径失败: %v, 日志仅输出到stderr", err)
+		return
+	}
+	if err := os.MkdirAll(absLogDir, 0755); err != nil {
+		log.Printf("创建log目录失败: %v, 日志仅输出到stderr", err)
+		return
+	}
+
+	dateStr := time.Now().Format("20060102")
+	logPath := filepath.Join(absLogDir, "pipeline_"+dateStr+".log")
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("打开日志文件失败: %v, 日志仅输出到stderr", err)
+		return
+	}
+
+	multiWriter := io.MultiWriter(os.Stderr, f)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.Ldate | log.Ltime)
+	log.Printf("日志文件: %s", logPath)
 }

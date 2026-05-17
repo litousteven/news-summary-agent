@@ -36,8 +36,12 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 		return nil, err
 	}
 
-	// Node: TagChatModel
-	if err := g.AddChatModelNode("TagChatModel", p.ChatModel,
+	// Node: TagChatModel (use TagChatModel if set, otherwise fallback to ChatModel)
+	tagCM := p.TagChatModel
+	if tagCM == nil {
+		tagCM = p.ChatModel
+	}
+	if err := g.AddChatModelNode("TagChatModel", tagCM,
 		compose.WithNodeName("标注LLM"),
 	); err != nil {
 		return nil, err

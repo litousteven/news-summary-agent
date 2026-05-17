@@ -214,6 +214,12 @@ func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []Me
 
 	resp, err := p.ChatModel.Generate(ctx, messages)
 	if err != nil {
+		promptPreview := sb.String()
+		if len(promptPreview) > 400 {
+			promptPreview = promptPreview[:400] + "..."
+		}
+		log.Printf("[MergeHistory] LLM verify call failed: error=%v | candidates_count=%d | prompt_preview=%q",
+			err, len(candidates), promptPreview)
 		return nil, fmt.Errorf("LLM verify call: %w", err)
 	}
 

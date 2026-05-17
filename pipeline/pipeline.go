@@ -33,6 +33,13 @@ type PipelineConfig struct {
 	MaxPerCategory   int     `yaml:"max_per_category"`
 	ClusterThreshold float64 `yaml:"cluster_threshold"`
 	FileExpiryDays   int     `yaml:"file_expiry_days"`
+
+	// 标注批次相关参数（一般无需调整，除非标注任务频繁失败）
+	TagBatchSize             int `yaml:"tag_batch_size"`
+	TagMaxConcurrentBatches  int `yaml:"tag_max_concurrent_batches"`
+	TagMaxRetries            int `yaml:"tag_max_retries"`
+	TagRetryBaseDelaySeconds int `yaml:"tag_retry_base_delay_seconds"`
+	TagBatchTimeoutSeconds   int `yaml:"tag_batch_timeout_seconds"`
 }
 
 // LoadConfig reads config.yaml from the given config directory.
@@ -57,13 +64,14 @@ func LoadConfig(configDir string) PipelineConfig {
 
 // NewsPipeline holds dependencies and builds the Eino Graph.
 type NewsPipeline struct {
-	ChatModel   model.BaseChatModel // shared by Tag and Summary stages
-	Embedding   EmbeddingClient     // OpenAI-compatible embedding for semantic dedup
-	EmbedCache  *EmbeddingCache     // per-day persistent cache for embedding vectors
-	ConfigDir   string              // path to config/ directory (config.yaml, feeds.yaml, tagging_guide.md, etc.)
-	DataDir     string              // path to data/ directory (runtime output: push_history, tagged_cache, digest)
-	ProxyAddr   string              // HTTP proxy for RSS feeds
-	Config      PipelineConfig      // configurable limits (loaded from config.yaml)
+	ChatModel    model.BaseChatModel // shared by Summary, MergeHistory, TranslateItems stages
+	TagChatModel model.BaseChatModel // tagging stage only (JSON forced mode), falls back to ChatModel
+	Embedding    EmbeddingClient     // OpenAI-compatible embedding for semantic dedup
+	EmbedCache   *EmbeddingCache     // per-day persistent cache for embedding vectors
+	ConfigDir    string              // path to config/ directory (config.yaml, feeds.yaml, tagging_guide.md, etc.)
+	DataDir      string              // path to data/ directory (runtime output: push_history, tagged_cache, digest)
+	ProxyAddr    string              // HTTP proxy for RSS feeds
+	Config       PipelineConfig      // configurable limits (loaded from config.yaml)
 }
 
 // Getters with defaults
@@ -107,6 +115,41 @@ func (p *NewsPipeline) GetFileExpiryDays() int {
 		return DefaultFileExpiryDays
 	}
 	return p.Config.FileExpiryDays
+}
+
+func (p *NewsPipeline) GetTagBatchSize() int {
+	if p.Config.TagBatchSize <= 0 {
+		return DefaultTagBatchSize
+	}
+	return p.Config.TagBatchSize
+}
+
+func (p *NewsPipeline) GetTagMaxConcurrentBatches() int {
+	if p.Config.TagMaxConcurrentBatches <= 0 {
+		return DefaultTagMaxConcurrentBatches
+	}
+	return p.Config.TagMaxConcurrentBatches
+}
+
+func (p *NewsPipeline) GetTagMaxRetries() int {
+	if p.Config.TagMaxRetries <= 0 {
+		return DefaultTagMaxRetries
+	}
+	return p.Config.TagMaxRetries
+}
+
+func (p *NewsPipeline) GetTagRetryBaseDelaySeconds() int {
+	if p.Config.TagRetryBaseDelaySeconds <= 0 {
+		return DefaultTagRetryBaseDelaySeconds
+	}
+	return p.Config.TagRetryBaseDelaySeconds
+}
+
+func (p *NewsPipeline) GetTagBatchTimeoutSeconds() int {
+	if p.Config.TagBatchTimeoutSeconds <= 0 {
+		return DefaultTagBatchTimeoutSeconds
+	}
+	return p.Config.TagBatchTimeoutSeconds
 }
 
 // EmbeddingClient is the interface for OpenAI-compatible embedding APIs.

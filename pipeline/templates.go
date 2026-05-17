@@ -25,28 +25,11 @@ const tagSystemPrompt = `你是一名国际新闻标注专家。你的任务是�
 6. display_title 是给用户看的标题，英文标题翻成自然中文
 7. interest_score 范围 0-10
 
-## 兴趣评分
-
-- 10分：航天重大任务、重大国际冲突升级、核心军事部署、AI/芯片重大突破
-- 8-9分：高相关国际军政新闻、航空工业重大事件、能源/供应链重大变化
-- 6-7分：一般重要国际新闻
-- 3-5分：相关性一般
-- 0-2分：弱相关、娱乐化、信息密度低
-- 拿不准时保守打 6 或 7
-
-## 重复项判定
-
-多条新闻描述同一事件时：
-- 选一条主项：is_duplicate=false, selected=true
-- 其他重复项：is_duplicate=true, selected=false
-- 同一事件的不同报道，display_title 应尽量保持一致
-- 主项优先原则：中文标题更清晰、信息更完整、来源更稳
-
-## 标注规范
+## 标注规范（来自 tagging_guide.md）
 
 {tagging_guide}
 
-## 标注示例
+## 标注示例（来自 tagging_examples）
 
 {tagging_examples}`
 
