@@ -72,6 +72,16 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 
 	log.Printf("[ParallelTag] 完成: 缓存 %d + 新标注 %d = %d/%d 条",
 		len(taggedFromCache), len(taggedNew), len(allTagged), len(items))
+
+	// Save counts to pipeline state for final stats
+	fetchedCount := len(items)
+	taggedCount := len(allTagged)
+	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+		state.OriginalFetchedCount = fetchedCount
+		state.ActualTaggedCount = taggedCount
+		return nil
+	})
+
 	return allTagged, nil
 }
 
@@ -83,6 +93,7 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	// Build the tag sub-graph once (shared across all batches)
 	tagGraph, err := p.buildTagSubGraph(ctx)
 	if err != nil {
+		log.Printf("[ParallelTag] 构建TagSubGraph失败: error=%v", err)
 		return nil, fmt.Errorf("build tag sub-graph: %w", err)
 	}
 
@@ -91,15 +102,17 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	categoriesText := formatCategoriesForPrompt(categories)
 	guide, err := p.loadTaggingGuide()
 	if err != nil {
+		log.Printf("[ParallelTag] 加载tagging_guide失败: error=%v", err)
 		return nil, fmt.Errorf("load tagging guide: %w", err)
 	}
 	examples, err := p.loadTaggingExamples()
 	if err != nil {
+		log.Printf("[ParallelTag] 加载tagging_examples失败: error=%v", err)
 		return nil, fmt.Errorf("load tagging examples: %w", err)
 	}
 
 	// Split into batches
-	batches := splitBatches(items, TagBatchSize)
+	batches := splitBatches(items, p.GetTagBatchSize())
 
 	type batchResult struct {
 		items []TaggedNewsItem
@@ -109,7 +122,12 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 
 	results := make([]batchResult, len(batches))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, MaxConcurrentTagBatches) // concurrency limiter
+	sem := make(chan struct{}, p.GetTagMaxConcurrentBatches()) // concurrency limiter
+
+	// Read tag config once for use in goroutines
+	maxRetries := p.GetTagMaxRetries()
+	retryBaseDelay := time.Duration(p.GetTagRetryBaseDelaySeconds()) * time.Second
+	batchTimeout := time.Duration(p.GetTagBatchTimeoutSeconds()) * time.Second
 
 	for i, batch := range batches {
 		wg.Add(1)
@@ -126,9 +144,9 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 			var tagged []TaggedNewsItem
 			var lastErr error
 		retryLoop:
-			for attempt := 0; attempt <= MaxTagRetries; attempt++ {
+			for attempt := 0; attempt <= maxRetries; attempt++ {
 				if attempt > 0 {
-					backoff := time.Duration(1<<(attempt-1)) * TagRetryBaseDelay
+					backoff := time.Duration(1<<(attempt-1)) * retryBaseDelay
 					log.Printf("[ParallelTag] batch %d/%d 第 %d 次重试（等待 %v）...",
 						idx+1, len(batches), attempt, backoff)
 					select {
@@ -140,20 +158,30 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 				}
 
 				// Create a per-attempt timeout context
-				batchCtx, cancel := context.WithTimeout(ctx, TagBatchTimeout)
+				batchCtx, cancel := context.WithTimeout(ctx, batchTimeout)
 				tagged, lastErr = tagGraph.Invoke(batchCtx, vars)
 				cancel()
 
 				if lastErr == nil {
 					break // success
 				}
-				log.Printf("[ParallelTag] batch %d/%d 第 %d 次尝试失败: %v",
-					idx+1, len(batches), attempt+1, lastErr)
+				newsItemsStr, _ := vars["news_items"].(string)
+				truncatedItems := newsItemsStr
+				if len(truncatedItems) > 300 {
+					truncatedItems = truncatedItems[:300] + "..."
+				}
+				log.Printf("[ParallelTag] batch %d/%d 第 %d 次尝试失败: error=%v | items_preview=%q",
+					idx+1, len(batches), attempt+1, lastErr, truncatedItems)
 			}
 
 			if lastErr != nil {
-				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃，重试 %d 次后仍失败）: %v",
-					idx+1, len(batches), MaxTagRetries, lastErr)
+				newsItemsStr, _ := vars["news_items"].(string)
+				truncatedItems := newsItemsStr
+				if len(truncatedItems) > 500 {
+					truncatedItems = truncatedItems[:500] + "..."
+				}
+				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃，重试 %d 次后仍失败）: error=%v | items_preview=%q | total_count=%v",
+					idx+1, len(batches), maxRetries, lastErr, truncatedItems, vars["total_count"])
 			}
 			results[idx] = batchResult{items: tagged, err: lastErr, index: idx}
 		}(i, batch)
@@ -224,26 +252,6 @@ func (p *NewsPipeline) appendTagCache(items []TaggedNewsItem) error {
 	return nil
 }
 
-// Tag batch processing constants.
-const (
-	// TagBatchSize controls how many news items are sent to the LLM per batch.
-	TagBatchSize = 15
-
-	// MaxConcurrentTagBatches limits the number of batches processed in parallel
-	// to avoid overwhelming the LLM API with too many concurrent requests.
-	MaxConcurrentTagBatches = 3
-
-	// MaxTagRetries is the maximum number of retry attempts for a failed batch.
-	// Each retry uses exponential backoff starting from TagRetryBaseDelay.
-	MaxTagRetries = 2
-
-	// TagRetryBaseDelay is the base delay for exponential backoff on retry.
-	TagRetryBaseDelay = 3 * time.Second
-
-	// TagBatchTimeout is the per-batch timeout applied to each tag sub-graph invocation.
-	TagBatchTimeout = 120 * time.Second
-)
-
 // formatBatchTagPromptVars builds template variables for one batch.
 func (p *NewsPipeline) formatBatchTagPromptVars(batch []RawNewsItem, categoriesText, guide, examples string) map[string]any {
 	var sb strings.Builder
@@ -284,6 +292,29 @@ func parseTagResultFromMessage(msg *schema.Message, rawByID map[string]RawNewsIt
 		}
 	}
 	if err != nil {
+		// JSON mode may return a single object instead of an array
+		var single tagResultItem
+		if err2 := json.Unmarshal([]byte(content), &single); err2 == nil {
+			results = []tagResultItem{single}
+			err = nil
+		}
+	}
+	if err != nil {
+		extracted := extractJSONArray(content)
+		if extracted != "" {
+			var single tagResultItem
+			if err2 := json.Unmarshal([]byte(extracted), &single); err2 == nil {
+				results = []tagResultItem{single}
+				err = nil
+			}
+		}
+	}
+	if err != nil {
+		contentPreview := content
+		if len(contentPreview) > 500 {
+			contentPreview = contentPreview[:500] + "..."
+		}
+		log.Printf("[ParseTagResult] 解析LLM输出失败: error=%v | content_preview=%q", err, contentPreview)
 		return nil, fmt.Errorf("failed to parse LLM tag output as JSON: %w", err)
 	}
 

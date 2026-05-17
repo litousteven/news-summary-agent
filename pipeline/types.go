@@ -74,6 +74,7 @@ type DigestItem struct {
 type DigestStats struct {
 	TotalFetched  int            `json:"total_fetched"`
 	TotalTagged   int            `json:"total_tagged"`
+	TaggingFailed int            `json:"tagging_failed"`
 	TotalSelected int            `json:"total_selected"`
 	ByCategory    map[string]int `json:"by_category"`
 }
@@ -114,6 +115,12 @@ type PipelineState struct {
 
 	// The slot from the original request
 	Slot string
+
+	// Set by FetchRSS (post-dedup), used by BuildDigest to track original fetch count
+	OriginalFetchedCount int
+
+	// Set by ParallelTag, used by BuildDigest to track actual tagged count
+	ActualTaggedCount int
 }
 
 // RSS feed configuration
@@ -149,9 +156,9 @@ var DefaultCategories = []CategoryDef{
 // They are initialized from DefaultCategories and may be overridden by
 // loadCategories() reading config/categories.json at runtime.
 var (
-	CategoryOrder  []string
+	CategoryOrder   []string
 	ValidCategories map[string]bool
-	CategoryDefs   []CategoryDef
+	CategoryDefs    []CategoryDef
 )
 
 func init() {
@@ -211,4 +218,11 @@ const (
 	DefaultMaxPerCategory   = 3
 	DefaultClusterThreshold = 0.75
 	DefaultFileExpiryDays   = 2
+
+	// 标注批次相关默认值（一般无需调整）
+	DefaultTagBatchSize             = 15
+	DefaultTagMaxConcurrentBatches  = 3
+	DefaultTagMaxRetries            = 2
+	DefaultTagRetryBaseDelaySeconds = 3
+	DefaultTagBatchTimeoutSeconds   = 120
 )

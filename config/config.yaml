@@ -2,19 +2,31 @@
 # 修改此文件后无需重新编译，下次运行自动生效
 
 # 每个RSS源最大抓取条目数
-max_items_per_feed: 30
+max_items_per_feed: 16
 
 # 总共最大抓取条目数
-max_total_items: 300
+max_total_items: 120
 
 # 简报最大入选条目数
 max_digest_items: 10
 
 # 每个分类最大条目数
-max_per_category: 3
+max_per_category: 5
 
 # 语义去重相似度阈值 (0.0~1.0，越低越容易判为重复)
 cluster_threshold: 0.75
 
-# data 目录文件过期天数（超过此天数的 push_history/tagged_cache/digest 文件将被清理）
+# data/log 目录文件过期天数（超过此天数的 push_history/tagged_cache/embedding_cache/digest/log 文件将被清理）
 file_expiry_days: 2
+
+# === 标注批次参数（一般无需调整，除非标注任务频繁失败） ===
+# 每批次发送给 LLM 的新闻条数
+# tag_batch_size: 15
+# 并行处理的批次数量上限
+# tag_max_concurrent_batches: 3
+# 单个批次失败后最大重试次数
+# tag_max_retries: 2
+# 重试指数退避的基础延迟（秒）
+# tag_retry_base_delay_seconds: 3
+# 单个批次的超时时间（秒）
+# tag_batch_timeout_seconds: 120
