@@ -184,9 +184,9 @@ func writeDigestMD(dataDir string, result *pipeline.NewsSummaryResult) error {
 		// Render references as Markdown quotes
 		for _, ref := range item.Refs {
 			if ref.Link != "" {
-				b.WriteString(fmt.Sprintf("  > %s: [%s](%s)\n", ref.RelationNote, ref.DisplayTitle, ref.Link))
+				b.WriteString(fmt.Sprintf("  > %s: [%s](%s)（%s）\n", ref.RelationNote, ref.DisplayTitle, ref.Link, ref.Source))
 			} else {
-				b.WriteString(fmt.Sprintf("  > %s: %s\n", ref.RelationNote, ref.DisplayTitle))
+				b.WriteString(fmt.Sprintf("  > %s: %s（%s）\n", ref.RelationNote, ref.DisplayTitle, ref.Source))
 			}
 		}
 	}

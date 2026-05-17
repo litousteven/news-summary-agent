@@ -122,14 +122,14 @@ func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []MergedNewsIt
 					Source:       items[j].Source,
 					Link:         items[j].Link,
 					Similarity:   sim,
-					RelationNote: "相关报道",
+					RelationNote: "相关",
 				}
 				refB := NewsReference{
 					DisplayTitle: items[i].DisplayTitle,
 					Source:       items[i].Source,
 					Link:         items[i].Link,
 					Similarity:   sim,
-					RelationNote: "相关报道",
+					RelationNote: "相关",
 				}
 				items[i].Refs = append(items[i].Refs, refA)
 				items[j].Refs = append(items[j].Refs, refB)

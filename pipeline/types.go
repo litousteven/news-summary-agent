@@ -36,7 +36,7 @@ type NewsCluster struct {
 }
 
 // NewsReference is a related news item, either from the same batch or from push history.
-// RelationNote indicates the relationship: "相关报道", "后续进展", "反转", etc.
+// RelationNote indicates the relationship: "相关", "前情回顾", "反转", etc.
 type NewsReference struct {
 	DisplayTitle string  `json:"display_title"`
 	Source       string  `json:"source"`
@@ -44,7 +44,7 @@ type NewsReference struct {
 	PushTime     string  `json:"push_time,omitempty"`    // only for history references
 	FactSummary  string  `json:"fact_summary,omitempty"` // only for history references
 	Similarity   float64 `json:"similarity,omitempty"`   // only for batch references
-	RelationNote string  `json:"relation_note"`          // "相关报道" / "后续进展" / "反转"
+	RelationNote string  `json:"relation_note"`          // "相关" / "前情回顾" / "反转"
 }
 
 // MergedNewsItem is a tagged item enriched with push history info.
