@@ -370,6 +370,3 @@ func splitBatches(items []RawNewsItem, batchSize int) [][]RawNewsItem {
 	}
 	return batches
 }
-
-// Ensure tagSubGraphState is used (compile check for unused import)
-var _ = compose.ProcessState[*tagSubGraphState]

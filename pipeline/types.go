@@ -221,7 +221,7 @@ const (
 
 	// 标注批次相关默认值（一般无需调整）
 	DefaultTagBatchSize             = 15
-	DefaultTagMaxConcurrentBatches  = 3
+	DefaultTagMaxConcurrentBatches  = 2
 	DefaultTagMaxRetries            = 2
 	DefaultTagRetryBaseDelaySeconds = 3
 	DefaultTagBatchTimeoutSeconds   = 120

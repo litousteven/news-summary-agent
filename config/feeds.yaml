@@ -51,12 +51,12 @@
   url: https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml
   lang: zh
   use_proxy: false
-  enabled: true
+  enabled: false
 
 - name: CNN
   url: http://rss.cnn.com/rss/edition.rss
   lang: en
-  use_proxy: false
+  use_proxy: true
   enabled: true
 
 - name: Washington Post
@@ -123,4 +123,4 @@
   url: https://www.japantimes.co.jp/feed/
   lang: en
   use_proxy: true
-  enabled: false
+  enabled: true

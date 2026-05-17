@@ -40,7 +40,8 @@ func main() {
 	// TagChatModel — 标注专用（JSON 强制模式）
 	tagChatModel, err := createChatModel(ctx, true)
 	if err != nil {
-		log.Fatalf("创建TagChatModel失败: %v", err)
+		log.Printf("创建TagChatModel失败: %v，将使用通用ChatModel继续", err)
+		tagChatModel = nil
 	}
 
 	// Embedding — OpenAI兼容的 Embedding 模型

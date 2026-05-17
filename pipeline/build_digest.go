@@ -94,11 +94,23 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 	}
 	digestItems = finalItems
 
+	var taggingFailed int
+	var originalFetchedCount, actualTaggedCount int
+	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+		originalFetchedCount = state.OriginalFetchedCount
+		actualTaggedCount = state.ActualTaggedCount
+		return nil
+	})
+	if originalFetchedCount > 0 {
+		taggingFailed = originalFetchedCount - actualTaggedCount
+	}
+
 	stats := DigestStats{
-		TotalFetched:  len(items),
-		TotalTagged:   len(items),
-		TotalSelected: len(digestItems),
-		ByCategory:    catCount,
+		TotalFetched:   originalFetchedCount,
+		TotalTagged:    actualTaggedCount,
+		TaggingFailed:  taggingFailed,
+		TotalSelected:  len(digestItems),
+		ByCategory:     catCount,
 	}
 
 	slotLabel := getSlotLabel()
