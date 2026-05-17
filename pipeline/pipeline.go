@@ -8,6 +8,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -241,9 +242,10 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		return nil, err
 	}
 
-	// 10. SummaryChatModel — same ChatModel instance for Summary stage
-	if err := g.AddChatModelNode(NodeSummaryChatModel, p.ChatModel,
-		compose.WithNodeName("摘要LLM"),
+	// 10. SummaryChatModel — same ChatModel instance for Summary stage (with fallback)
+	if err := g.AddLambdaNode(NodeSummaryChatModel,
+		compose.InvokableLambda(p.summaryChatModelWithFallback),
+		compose.WithNodeName("摘要LLM兜底"),
 	); err != nil {
 		return nil, err
 	}
@@ -295,6 +297,19 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 }
 
 // Run is a convenience method to build and execute the pipeline.
+func (p *NewsPipeline) summaryChatModelWithFallback(ctx context.Context, prompts []*schema.Message) (*schema.Message, error) {
+	if len(prompts) == 0 {
+		return nil, nil
+	}
+	prompt := prompts[0]
+	resp, err := p.ChatModel.Generate(ctx, []*schema.Message{prompt})
+	if err != nil {
+		log.Printf("[SummaryChatModel] LLM调用失败: %v，使用原始digest_content兜底", err)
+		return &schema.Message{Content: prompt.Content}, nil
+	}
+	return resp, nil
+}
+
 func (p *NewsPipeline) Run(ctx context.Context, req *NewsSummaryRequest) (*NewsSummaryResult, error) {
 	r, err := p.BuildGraph(ctx)
 	if err != nil {
