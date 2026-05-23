@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 // --- P1: parseTagResult merges RawNewsItem fields from PipelineState ---
@@ -20,8 +21,8 @@ import (
 // mergeRawItemsIntoTagged is the core logic of P1 fix, extracted for testability.
 // It merges raw news item fields (Source, Title, Summary, Link, etc.) into tagged items
 // by matching on ID.
-func mergeRawItemsIntoTagged(tagged []TaggedNewsItem, rawItems []RawNewsItem) []TaggedNewsItem {
-	rawByID := make(map[string]RawNewsItem, len(rawItems))
+func mergeRawItemsIntoTagged(tagged []types.TaggedNewsItem, rawItems []types.RawNewsItem) []types.TaggedNewsItem {
+	rawByID := make(map[string]types.RawNewsItem, len(rawItems))
 	for _, raw := range rawItems {
 		rawByID[raw.ID] = raw
 	}
@@ -35,7 +36,7 @@ func mergeRawItemsIntoTagged(tagged []TaggedNewsItem, rawItems []RawNewsItem) []
 }
 
 func TestMergeRawItemsIntoTagged_MergesAllFields(t *testing.T) {
-	rawItems := []RawNewsItem{
+	rawItems := []types.RawNewsItem{
 		{
 			ID:          "bbc-a1b2c3d4",
 			Source:      "BBC",
@@ -59,9 +60,9 @@ func TestMergeRawItemsIntoTagged_MergesAllFields(t *testing.T) {
 	}
 
 	// Simulate LLM output: only ID and tag fields, raw content is empty
-	tagged := []TaggedNewsItem{
+	tagged := []types.TaggedNewsItem{
 		{
-			RawNewsItem:  RawNewsItem{ID: "bbc-a1b2c3d4"},
+			RawNewsItem:  types.RawNewsItem{ID: "bbc-a1b2c3d4"},
 			DisplayTitle: "美军在海湾扣押伊朗船只",
 			Category:     "战争与地缘",
 			TopicTags:    []string{"伊朗", "海湾"},
@@ -73,7 +74,7 @@ func TestMergeRawItemsIntoTagged_MergesAllFields(t *testing.T) {
 			WhySelected:   "地缘冲突升级",
 		},
 		{
-			RawNewsItem:  RawNewsItem{ID: "中新网-e5f6a7b8"},
+			RawNewsItem:  types.RawNewsItem{ID: "中新网-e5f6a7b8"},
 			DisplayTitle: "SpaceX发射新一代卫星",
 			Category:     "航空航天",
 			TopicTags:    []string{"SpaceX", "卫星"},
@@ -136,13 +137,13 @@ func TestMergeRawItemsIntoTagged_MergesAllFields(t *testing.T) {
 }
 
 func TestMergeRawItemsIntoTagged_OnlyMatchingIDs(t *testing.T) {
-	rawItems := []RawNewsItem{
+	rawItems := []types.RawNewsItem{
 		{ID: "bbc-1111", Source: "BBC", Title: "BBC Original", Summary: "BBC Summary"},
 	}
 
-	tagged := []TaggedNewsItem{
-		{RawNewsItem: RawNewsItem{ID: "bbc-1111"}, DisplayTitle: "BBC Tagged", Category: "战争与地缘"},
-		{RawNewsItem: RawNewsItem{ID: "npr-9999"}, DisplayTitle: "NPR Tagged", Category: "航空航天"},
+	tagged := []types.TaggedNewsItem{
+		{RawNewsItem: types.RawNewsItem{ID: "bbc-1111"}, DisplayTitle: "BBC Tagged", Category: "战争与地缘"},
+		{RawNewsItem: types.RawNewsItem{ID: "npr-9999"}, DisplayTitle: "NPR Tagged", Category: "航空航天"},
 	}
 
 	result := mergeRawItemsIntoTagged(tagged, rawItems)
@@ -169,8 +170,8 @@ func TestMergeRawItemsIntoTagged_OnlyMatchingIDs(t *testing.T) {
 }
 
 func TestMergeRawItemsIntoTagged_EmptyRawItems(t *testing.T) {
-	tagged := []TaggedNewsItem{
-		{RawNewsItem: RawNewsItem{ID: "test-1111"}, DisplayTitle: "Test Title", Category: "AI与数码"},
+	tagged := []types.TaggedNewsItem{
+		{RawNewsItem: types.RawNewsItem{ID: "test-1111"}, DisplayTitle: "Test Title", Category: "AI与数码"},
 	}
 
 	result := mergeRawItemsIntoTagged(tagged, nil)
@@ -261,7 +262,7 @@ func TestTagNewItems_FailedBatchDropped(t *testing.T) {
 		ChatModel: &mockChatModelTagDrop{},
 	}
 
-	items := []RawNewsItem{
+	items := []types.RawNewsItem{
 		{ID: "item-1", Source: "BBC", Title: "英国经济下行", Summary: "英国央行发布数据", Link: "https://bbc.co.uk/1", PublishedAt: "2026-05-07T10:00:00Z", Lang: "en"},
 		{ID: "item-2", Source: "NPR", Title: "美国经济继续反弹", Summary: "最新就业数据好于预期", Link: "https://npr.org/2", PublishedAt: "2026-05-07T09:00:00Z", Lang: "en"},
 	}
@@ -281,11 +282,11 @@ func TestTagNewItems_FailedBatchDropped(t *testing.T) {
 func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	digestItems := []DigestItem{
+	digestItems := []types.DigestItem{
 		{
-			MergedNewsItem: MergedNewsItem{
-				TaggedNewsItem: TaggedNewsItem{
-					RawNewsItem: RawNewsItem{
+			MergedNewsItem: types.MergedNewsItem{
+				TaggedNewsItem: types.TaggedNewsItem{
+					RawNewsItem: types.RawNewsItem{
 						ID:     "bbc-1111",
 						Source: "BBC",
 						Title:  "Raw title 1",
@@ -300,9 +301,9 @@ func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 			FactParagraph: "美军在海湾扣押了一艘伊朗船只，涉及武器走私。",
 		},
 		{
-			MergedNewsItem: MergedNewsItem{
-				TaggedNewsItem: TaggedNewsItem{
-					RawNewsItem: RawNewsItem{
+			MergedNewsItem: types.MergedNewsItem{
+				TaggedNewsItem: types.TaggedNewsItem{
+					RawNewsItem: types.RawNewsItem{
 						ID:     "中新网-2222",
 						Source: "中新网",
 						Title:  "原始标题2",
@@ -319,14 +320,14 @@ func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 	}
 
 	// Set up context with PipelineState containing DigestItems and Slot
-	ctx := injectState(context.Background(), &PipelineState{
+	ctx := injectState(context.Background(), &types.PipelineState{
 		DigestItems: digestItems,
 		Slot:        "12:00",
 	})
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
 
-	result, err := p.recordHistory(ctx, &DigestData{Items: digestItems})
+	result, err := p.recordHistory(ctx, &types.DigestData{Items: digestItems})
 	if err != nil {
 		t.Fatalf("recordHistory returned error: %v", err)
 	}
@@ -388,11 +389,11 @@ func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 func TestRecordHistory_WritesPerItemRecordsWithEmbeddings(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	digestItems := []DigestItem{
+	digestItems := []types.DigestItem{
 		{
-			MergedNewsItem: MergedNewsItem{
-				TaggedNewsItem: TaggedNewsItem{
-					RawNewsItem: RawNewsItem{
+			MergedNewsItem: types.MergedNewsItem{
+				TaggedNewsItem: types.TaggedNewsItem{
+					RawNewsItem: types.RawNewsItem{
 						ID:     "bbc-1111",
 						Source: "BBC",
 						Title:  "Raw title",
@@ -408,7 +409,7 @@ func TestRecordHistory_WritesPerItemRecordsWithEmbeddings(t *testing.T) {
 		},
 	}
 
-	ctx := injectState(context.Background(), &PipelineState{
+	ctx := injectState(context.Background(), &types.PipelineState{
 		DigestItems: digestItems,
 		Slot:        "manual",
 	})
@@ -420,7 +421,7 @@ func TestRecordHistory_WritesPerItemRecordsWithEmbeddings(t *testing.T) {
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir, Embedding: mockEmbed}
 
-	_, err := p.recordHistory(ctx, &DigestData{Items: digestItems})
+	_, err := p.recordHistory(ctx, &types.DigestData{Items: digestItems})
 	if err != nil {
 		t.Fatalf("recordHistory returned error: %v", err)
 	}
@@ -443,14 +444,14 @@ func TestRecordHistory_FallbackToSessionRecord(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// No DigestItems in state — should fall back to session-level record
-	ctx := injectState(context.Background(), &PipelineState{
+	ctx := injectState(context.Background(), &types.PipelineState{
 		DigestItems: nil,
 		Slot:        "18:00",
 	})
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
 
-	result, err := p.recordHistory(ctx, &DigestData{Items: nil})
+	result, err := p.recordHistory(ctx, &types.DigestData{Items: nil})
 	if err != nil {
 		t.Fatalf("recordHistory returned error: %v", err)
 	}
@@ -479,11 +480,11 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Step 1: Record per-item history via RecordHistoryFromDigest
-	digestItems := []DigestItem{
+	digestItems := []types.DigestItem{
 		{
-			MergedNewsItem: MergedNewsItem{
-				TaggedNewsItem: TaggedNewsItem{
-					RawNewsItem: RawNewsItem{
+			MergedNewsItem: types.MergedNewsItem{
+				TaggedNewsItem: types.TaggedNewsItem{
+					RawNewsItem: types.RawNewsItem{
 						ID:     "bbc-1111",
 						Source: "BBC",
 						Title:  "US seizes Iranian ship",
@@ -515,9 +516,9 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 	}
 
 	// Step 2: Merge new items — one with same DisplayTitle, one new
-	newItems := []TaggedNewsItem{
+	newItems := []types.TaggedNewsItem{
 		{
-			RawNewsItem: RawNewsItem{
+			RawNewsItem: types.RawNewsItem{
 				ID:     "bbc-2222",
 				Source: "BBC",
 				Title:  "US seizes another Iranian ship",
@@ -526,7 +527,7 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 			InterestScore: 8,
 		},
 		{
-			RawNewsItem: RawNewsItem{
+			RawNewsItem: types.RawNewsItem{
 				ID:     "npr-3333",
 				Source: "NPR",
 				Title:  "NATO summit begins",
@@ -563,11 +564,11 @@ func TestRecordHistory_ThenMergeHistory_DeduplicatesByTitle(t *testing.T) {
 func TestRecordHistoryFromDigest_WithEmbeddings(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	digestItems := []DigestItem{
+	digestItems := []types.DigestItem{
 		{
-			MergedNewsItem: MergedNewsItem{
-				TaggedNewsItem: TaggedNewsItem{
-					RawNewsItem:  RawNewsItem{ID: "test-1", Source: "BBC", Title: "Test", Link: "https://example.com"},
+			MergedNewsItem: types.MergedNewsItem{
+				TaggedNewsItem: types.TaggedNewsItem{
+					RawNewsItem:  types.RawNewsItem{ID: "test-1", Source: "BBC", Title: "Test", Link: "https://example.com"},
 					DisplayTitle: "测试1",
 					Category:     "AI与数码",
 				},
@@ -575,9 +576,9 @@ func TestRecordHistoryFromDigest_WithEmbeddings(t *testing.T) {
 			FactParagraph: "测试事实1",
 		},
 		{
-			MergedNewsItem: MergedNewsItem{
-				TaggedNewsItem: TaggedNewsItem{
-					RawNewsItem:  RawNewsItem{ID: "test-2", Source: "NPR", Title: "Test2", Link: "https://example.com/2"},
+			MergedNewsItem: types.MergedNewsItem{
+				TaggedNewsItem: types.TaggedNewsItem{
+					RawNewsItem:  types.RawNewsItem{ID: "test-2", Source: "NPR", Title: "Test2", Link: "https://example.com/2"},
 					DisplayTitle: "测试2",
 					Category:     "航空航天",
 				},
@@ -653,21 +654,21 @@ func TestParseTagResult_StateInjectionViaGraph(t *testing.T) {
 	// 2. "to_msg" node: creates a *schema.Message (simulating LLM output)
 	// 3. "parse" node: calls parseTagResult which reads state
 
-	g := compose.NewGraph[map[string]any, []TaggedNewsItem](
-		compose.WithGenLocalState(func(ctx context.Context) *PipelineState {
-			return &PipelineState{}
+	g := compose.NewGraph[map[string]any, []types.TaggedNewsItem](
+		compose.WithGenLocalState(func(ctx context.Context) *types.PipelineState {
+			return &types.PipelineState{}
 		}),
 	)
 
 	// Node 1: produce raw items and save to state
-	rawItems := []RawNewsItem{
+	rawItems := []types.RawNewsItem{
 		{ID: "test-1", Source: "BBC", Title: "Test Title", Summary: "Test Summary", Link: "https://example.com", Lang: "en"},
 	}
 	if err := g.AddLambdaNode("raw",
-		compose.InvokableLambda(func(ctx context.Context, _ map[string]any) ([]RawNewsItem, error) {
+		compose.InvokableLambda(func(ctx context.Context, _ map[string]any) ([]types.RawNewsItem, error) {
 			return rawItems, nil
 		}),
-		compose.WithStatePostHandler(func(ctx context.Context, out []RawNewsItem, state *PipelineState) ([]RawNewsItem, error) {
+		compose.WithStatePostHandler(func(ctx context.Context, out []types.RawNewsItem, state *types.PipelineState) ([]types.RawNewsItem, error) {
 			state.RawItems = out
 			return out, nil
 		}),
@@ -677,7 +678,7 @@ func TestParseTagResult_StateInjectionViaGraph(t *testing.T) {
 
 	// Node 2: create a *schema.Message simulating LLM output
 	if err := g.AddLambdaNode("to_msg",
-		compose.InvokableLambda(func(ctx context.Context, items []RawNewsItem) (*schema.Message, error) {
+		compose.InvokableLambda(func(ctx context.Context, items []types.RawNewsItem) (*schema.Message, error) {
 			// Generate JSON that only contains id and tag fields (no raw content)
 			output := `[{"id":"test-1","display_title":"测试标题","category":"AI与数码","topic_tags":["AI"],"region":"北美","interest_score":8,"is_duplicate":false,"selected":true,"why_selected":"测试"}]`
 			return &schema.Message{Content: output}, nil
@@ -755,7 +756,7 @@ func TestMergeHistory_SeenBeforeHighScore_IsDuplicate(t *testing.T) {
 
 	// Write a history record
 	now := "2026-04-28T12:00:00Z"
-	records := []PushHistoryRecord{
+	records := []types.PushHistoryRecord{
 		{
 			PushTime:     now,
 			Slot:         "12:00",
@@ -769,9 +770,9 @@ func TestMergeHistory_SeenBeforeHighScore_IsDuplicate(t *testing.T) {
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
 
-	items := []TaggedNewsItem{
+	items := []types.TaggedNewsItem{
 		{
-			RawNewsItem: RawNewsItem{
+			RawNewsItem: types.RawNewsItem{
 				ID:     "bbc-aaaa",
 				Source: "BBC",
 				Title:  "Iran launches retaliatory strike",
@@ -801,7 +802,7 @@ func TestMergeHistory_SeenBeforeLowScore_IsDuplicate(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	now := "2026-04-28T12:00:00Z"
-	records := []PushHistoryRecord{
+	records := []types.PushHistoryRecord{
 		{
 			PushTime: now,
 			Slot:     "12:00",
@@ -816,9 +817,9 @@ func TestMergeHistory_SeenBeforeLowScore_IsDuplicate(t *testing.T) {
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
 
-	items := []TaggedNewsItem{
+	items := []types.TaggedNewsItem{
 		{
-			RawNewsItem: RawNewsItem{
+			RawNewsItem: types.RawNewsItem{
 				ID:     "npr-bbbb",
 				Source: "NPR",
 				Title:  "Minor update on event",
@@ -850,9 +851,9 @@ func TestMergeHistory_NewEventAlwaysPushes(t *testing.T) {
 	// No history for this event
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
 
-	items := []TaggedNewsItem{
+	items := []types.TaggedNewsItem{
 		{
-			RawNewsItem: RawNewsItem{
+			RawNewsItem: types.RawNewsItem{
 				ID:     "bbc-new1",
 				Source: "BBC",
 				Title:  "Brand new event",
@@ -875,10 +876,10 @@ func TestMergeHistory_NewEventAlwaysPushes(t *testing.T) {
 }
 
 func TestBuildDigest_ExcludesSeenBeforeDuplicates(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC", Title: "New event", Summary: "New summary"},
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:  types.RawNewsItem{ID: "1", Source: "BBC", Title: "New event", Summary: "New summary"},
 				DisplayTitle: "新事件",
 				Category:     "战争与地缘",
 
@@ -886,8 +887,8 @@ func TestBuildDigest_ExcludesSeenBeforeDuplicates(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:   RawNewsItem{ID: "2", Source: "BBC", Title: "Follow-up", Summary: "Follow-up summary"},
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:   types.RawNewsItem{ID: "2", Source: "BBC", Title: "Follow-up", Summary: "Follow-up summary"},
 				DisplayTitle:  "追踪事件",
 				Category:      "战争与地缘",
 				InterestScore: 8,
@@ -895,8 +896,8 @@ func TestBuildDigest_ExcludesSeenBeforeDuplicates(t *testing.T) {
 			SeenBefore: true,
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:   RawNewsItem{ID: "3", Source: "NPR", Title: "Low score", Summary: "Low summary"},
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:   types.RawNewsItem{ID: "3", Source: "NPR", Title: "Low score", Summary: "Low summary"},
 				DisplayTitle:  "低分旧事件",
 				Category:      "其他重要动态",
 				InterestScore: 5,
@@ -925,15 +926,15 @@ func TestBuildDigest_ExcludesSeenBeforeDuplicates(t *testing.T) {
 // --- Reference news tests ---
 
 func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:   RawNewsItem{ID: "1", Source: "BBC", Title: "Iran strike", Summary: "Iran launched missiles", Link: "https://bbc.co.uk/2"},
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:   types.RawNewsItem{ID: "1", Source: "BBC", Title: "Iran strike", Summary: "Iran launched missiles", Link: "https://bbc.co.uk/2"},
 				DisplayTitle:  "伊朗发动导弹袭击",
 				Category:      "战争与地缘",
 				InterestScore: 9,
 			},
-			Refs: []NewsReference{
+			Refs: []types.NewsReference{
 				{
 					DisplayTitle: "美伊冲突升级",
 					Link:         "https://bbc.co.uk/1",
@@ -944,13 +945,13 @@ func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:   RawNewsItem{ID: "2", Source: "NPR", Title: "AI breakthrough", Summary: "New AI model released", Link: "https://npr.org/2"},
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:   types.RawNewsItem{ID: "2", Source: "NPR", Title: "AI breakthrough", Summary: "New AI model released", Link: "https://npr.org/2"},
 				DisplayTitle:  "AI新突破",
 				Category:      "AI与数码",
 				InterestScore: 8,
 			},
-			Refs: []NewsReference{
+			Refs: []types.NewsReference{
 				{
 					DisplayTitle: "AI模型发展",
 					Link:         "https://npr.org/1",
@@ -991,14 +992,14 @@ func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
 }
 
 func TestBuildItemSummaryPrompt_IncludesReferenceContext(t *testing.T) {
-	item := &DigestItem{
-		MergedNewsItem: MergedNewsItem{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC"},
+	item := &types.DigestItem{
+		MergedNewsItem: types.MergedNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:  types.RawNewsItem{ID: "1", Source: "BBC"},
 				DisplayTitle: "伊朗发动导弹袭击",
 				Category:     "战争与地缘",
 			},
-			Refs: []NewsReference{
+			Refs: []types.NewsReference{
 				{
 					DisplayTitle: "美伊冲突升级",
 					FactSummary:  "美伊冲突的前情概要",
@@ -1026,11 +1027,11 @@ func TestBuildItemSummaryPrompt_IncludesReferenceContext(t *testing.T) {
 }
 
 func TestMergeHistory_ReferencesCappedAtTwo(t *testing.T) {
-	item := MergedNewsItem{
-		TaggedNewsItem: TaggedNewsItem{
-			RawNewsItem: RawNewsItem{ID: "1", Source: "BBC"},
+	item := types.MergedNewsItem{
+		TaggedNewsItem: types.TaggedNewsItem{
+			RawNewsItem: types.RawNewsItem{ID: "1", Source: "BBC"},
 		},
-		Refs: []NewsReference{
+		Refs: []types.NewsReference{
 			{DisplayTitle: "ref1", RelationNote: "前情回顾"},
 			{DisplayTitle: "ref2", RelationNote: "前情回顾"},
 			{DisplayTitle: "ref3", RelationNote: "反转"},
@@ -1057,18 +1058,18 @@ func TestLlmVerifyDuplicates_ParsesProgressAndReversal(t *testing.T) {
 		},
 	}
 
-	items := []MergedNewsItem{
-		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "1", Summary: "摘要1"}, DisplayTitle: "新闻1"}},
-		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "2", Summary: "摘要2"}, DisplayTitle: "新闻2"}},
-		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "3", Summary: "摘要3"}, DisplayTitle: "新闻3"}},
-		{TaggedNewsItem: TaggedNewsItem{RawNewsItem: RawNewsItem{ID: "4", Summary: "摘要4"}, DisplayTitle: "新闻4"}},
+	items := []types.MergedNewsItem{
+		{TaggedNewsItem: types.TaggedNewsItem{RawNewsItem: types.RawNewsItem{ID: "1", Summary: "摘要1"}, DisplayTitle: "新闻1"}},
+		{TaggedNewsItem: types.TaggedNewsItem{RawNewsItem: types.RawNewsItem{ID: "2", Summary: "摘要2"}, DisplayTitle: "新闻2"}},
+		{TaggedNewsItem: types.TaggedNewsItem{RawNewsItem: types.RawNewsItem{ID: "3", Summary: "摘要3"}, DisplayTitle: "新闻3"}},
+		{TaggedNewsItem: types.TaggedNewsItem{RawNewsItem: types.RawNewsItem{ID: "4", Summary: "摘要4"}, DisplayTitle: "新闻4"}},
 	}
 
 	candidates := []embedCandidate{
-		{itemIdx: 0, record: &PushHistoryRecord{DisplayTitle: "历史1", FactSummary: "历史摘要1"}, sim: 0.85},
-		{itemIdx: 1, record: &PushHistoryRecord{DisplayTitle: "历史2", FactSummary: "历史摘要2"}, sim: 0.82},
-		{itemIdx: 2, record: &PushHistoryRecord{DisplayTitle: "历史3", FactSummary: "历史摘要3"}, sim: 0.90},
-		{itemIdx: 3, record: &PushHistoryRecord{DisplayTitle: "历史4", FactSummary: "历史摘要4"}, sim: 0.78},
+		{itemIdx: 0, record: &types.PushHistoryRecord{DisplayTitle: "历史1", FactSummary: "历史摘要1"}, sim: 0.85},
+		{itemIdx: 1, record: &types.PushHistoryRecord{DisplayTitle: "历史2", FactSummary: "历史摘要2"}, sim: 0.82},
+		{itemIdx: 2, record: &types.PushHistoryRecord{DisplayTitle: "历史3", FactSummary: "历史摘要3"}, sim: 0.90},
+		{itemIdx: 3, record: &types.PushHistoryRecord{DisplayTitle: "历史4", FactSummary: "历史摘要4"}, sim: 0.78},
 	}
 
 	results, err := p.llmVerifyDuplicatesMerged(context.Background(), items, candidates)
@@ -1129,7 +1130,7 @@ func contains(s, sub string) bool {
 
 // injectState creates a context with PipelineState that can be read by
 // compose.ProcessState. It uses the Eino-internal state key mechanism.
-func injectState(ctx context.Context, state *PipelineState) context.Context {
+func injectState(ctx context.Context, state *types.PipelineState) context.Context {
 	// Use compose.ProcessState-compatible state injection by building a minimal
 	// graph, compiling it, and using its runCtx. But that's too complex for unit tests.
 	//
@@ -1147,7 +1148,7 @@ func injectState(ctx context.Context, state *PipelineState) context.Context {
 
 	// Create a simple graph just to get the right context with state injected
 	g := compose.NewGraph[string, string](
-		compose.WithGenLocalState(func(ctx context.Context) *PipelineState {
+		compose.WithGenLocalState(func(ctx context.Context) *types.PipelineState {
 			return state
 		}),
 	)
@@ -1174,7 +1175,7 @@ func injectState(ctx context.Context, state *PipelineState) context.Context {
 	// create a graph node that captures the context
 	ctxCh := make(chan context.Context, 1)
 	captureG := compose.NewGraph[string, string](
-		compose.WithGenLocalState(func(ctx context.Context) *PipelineState {
+		compose.WithGenLocalState(func(ctx context.Context) *types.PipelineState {
 			return state
 		}),
 	)
@@ -1249,7 +1250,7 @@ func (m *mockChatModelTagDrop) Stream(ctx context.Context, input []*schema.Messa
 	return nil, fmt.Errorf("not implemented")
 }
 
-func loadHistoryRecords(t *testing.T, dataDir string) []PushHistoryRecord {
+func loadHistoryRecords(t *testing.T, dataDir string) []types.PushHistoryRecord {
 	t.Helper()
 	// Read from today's per-day history file
 	today := time.Now().UTC().Format("20060102")
@@ -1262,12 +1263,12 @@ func loadHistoryRecords(t *testing.T, dataDir string) []PushHistoryRecord {
 		t.Fatalf("read history file: %v", err)
 	}
 
-	var records []PushHistoryRecord
+	var records []types.PushHistoryRecord
 	for _, line := range splitLines(string(data)) {
 		if line == "" {
 			continue
 		}
-		var r PushHistoryRecord
+		var r types.PushHistoryRecord
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			t.Fatalf("unmarshal history record: %v\nline: %s", err, line)
 		}
@@ -1276,7 +1277,7 @@ func loadHistoryRecords(t *testing.T, dataDir string) []PushHistoryRecord {
 	return records
 }
 
-func writeHistoryRecords(t *testing.T, dataDir string, records []PushHistoryRecord) {
+func writeHistoryRecords(t *testing.T, dataDir string, records []types.PushHistoryRecord) {
 	t.Helper()
 	today := time.Now().UTC().Format("20060102")
 	path := filepath.Join(dataDir, "push_history_"+today+".jsonl")
@@ -1297,7 +1298,7 @@ func writeHistoryRecords(t *testing.T, dataDir string, records []PushHistoryReco
 	}
 }
 
-func findByDisplayTitle(records []PushHistoryRecord, title string) *PushHistoryRecord {
+func findByDisplayTitle(records []types.PushHistoryRecord, title string) *types.PushHistoryRecord {
 	for i := range records {
 		if records[i].DisplayTitle == title {
 			return &records[i]
@@ -1326,4 +1327,4 @@ func splitLines(s string) []string {
 }
 
 // Verify PipelineState types match what compose.ProcessState expects
-var _ = compose.ProcessState[*PipelineState]
+var _ = compose.ProcessState[*types.PipelineState]

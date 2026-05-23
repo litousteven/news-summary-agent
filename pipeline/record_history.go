@@ -11,18 +11,19 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/compose"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
-func (p *NewsPipeline) recordHistory(ctx context.Context, data *DigestData) (*NewsSummaryResult, error) {
+func (p *NewsPipeline) recordHistory(ctx context.Context, data *types.DigestData) (*types.NewsSummaryResult, error) {
 	message := buildFinalMessage(data)
 
-	result := &NewsSummaryResult{
+	result := &types.NewsSummaryResult{
 		Message: message,
 		Stats:   data.Stats,
 	}
 
 	var slot string
-	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+	_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
 		slot = state.Slot
 		return nil
 	})
@@ -36,7 +37,7 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, data *DigestData) (*Ne
 	} else {
 		slotLabel := slotToLabel(slot)
 		now := time.Now().Format(time.RFC3339)
-		record := PushHistoryRecord{
+		record := types.PushHistoryRecord{
 			PushTime:     now,
 			Slot:         slot,
 			DisplayTitle: fmt.Sprintf("国际新闻简报 %s", slotLabel),
@@ -53,12 +54,12 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, data *DigestData) (*Ne
 	return result, nil
 }
 
-func buildFinalMessage(data *DigestData) string {
+func buildFinalMessage(data *types.DigestData) string {
 	if len(data.Items) == 0 {
 		return ""
 	}
 
-	byCategory := make(map[string][]DigestItem)
+	byCategory := make(map[string][]types.DigestItem)
 	var catOrder []string
 	seen := make(map[string]bool)
 	for _, item := range data.Items {
@@ -75,7 +76,7 @@ func buildFinalMessage(data *DigestData) string {
 
 	sort.SliceStable(catOrder, func(i, j int) bool {
 		ci, cj := catOrder[i], catOrder[j]
-		for _, c := range CategoryOrder {
+		for _, c := range types.CategoryOrder {
 			if c == ci {
 				return true
 			}
@@ -119,7 +120,7 @@ func (p *NewsPipeline) historyFilePath(t time.Time) string {
 
 // RecordHistoryFromDigest appends individual item records to today's history file.
 // Computes embeddings for each item if Embedding client is available.
-func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []DigestItem, slot string) error {
+func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []types.DigestItem, slot string) error {
 	now := time.Now()
 	path := p.historyFilePath(now)
 
@@ -148,7 +149,7 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []Dige
 
 	nowStr := now.Format(time.RFC3339)
 	for i, item := range items {
-		record := PushHistoryRecord{
+		record := types.PushHistoryRecord{
 			PushTime:     nowStr,
 			Slot:         slot,
 			DisplayTitle: item.DisplayTitle,
@@ -175,7 +176,7 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []Dige
 }
 
 // appendHistoryRecord appends a single record to today's history file.
-func (p *NewsPipeline) appendHistoryRecord(record PushHistoryRecord) error {
+func (p *NewsPipeline) appendHistoryRecord(record types.PushHistoryRecord) error {
 	path := p.historyFilePath(time.Now())
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

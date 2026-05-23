@@ -16,6 +16,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/litousteven/news-summary-agent/pipeline"
+	"github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 func main() {
@@ -81,7 +82,7 @@ func main() {
 	// Cleanup expired data files before pipeline run
 	p.CleanupExpiredFiles()
 
-	result, err := p.Run(ctx, &pipeline.NewsSummaryRequest{
+	result, err := p.Run(ctx, &types.NewsSummaryRequest{
 		Slot: *slot,
 	})
 	if err != nil {
@@ -158,7 +159,7 @@ func createEmbeddingClient() pipeline.EmbeddingClient {
 }
 
 // writeDigestMD writes the pushed news items to a timestamped .md file.
-func writeDigestMD(dataDir string, result *pipeline.NewsSummaryResult) error {
+func writeDigestMD(dataDir string, result *types.NewsSummaryResult) error {
 	now := time.Now()
 	filename := fmt.Sprintf("digest_%s.md", now.Format("20060102_150405"))
 	path := filepath.Join(dataDir, filename)

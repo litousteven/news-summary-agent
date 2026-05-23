@@ -9,13 +9,15 @@ import (
 	"sync"
 
 	"github.com/cloudwego/eino/schema"
+	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 type itemSummaryResult struct {
 	Summary string `json:"summary"`
 }
 
-func (p *NewsPipeline) summarizePerItem(ctx context.Context, data *DigestData) (*DigestData, error) {
+func (p *NewsPipeline) summarizePerItem(ctx context.Context, data *types.DigestData) (*types.DigestData, error) {
 	log.Printf("[SummarizePerItem] Start, total items: %d", len(data.Items))
 	if p.ChatModel == nil {
 		log.Printf("[SummarizePerItem] ChatModel is nil, skipping")
@@ -88,7 +90,7 @@ func (p *NewsPipeline) summarizePerItem(ctx context.Context, data *DigestData) (
 	return data, nil
 }
 
-func buildItemSummaryPrompt(item *DigestItem) string {
+func buildItemSummaryPrompt(item *types.DigestItem) string {
 	var sb strings.Builder
 	sb.WriteString("请将以下新闻用自己的话概括为一段简洁的新闻摘要（50-100字），以 JSON 格式返回。\n\n")
 
@@ -119,7 +121,7 @@ func buildItemSummaryPrompt(item *DigestItem) string {
 func parseItemSummaryResponse(content string) *itemSummaryResult {
 	var result itemSummaryResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		extracted := extractJSONFromMarkdown(content)
+		extracted := tagpkg.ExtractJSONFromMarkdown(content)
 		if extracted != "" {
 			if err2 := json.Unmarshal([]byte(extracted), &result); err2 != nil {
 				return nil

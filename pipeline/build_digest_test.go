@@ -3,22 +3,24 @@ package pipeline
 import (
 	"context"
 	"testing"
+
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 func TestDedupCluster_SameLink(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/news/1",
-					Source: "中新网",
+					Source: "央视新闻",
 				},
 				DisplayTitle: "标题1",
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/news/1", // same link
 					Source: "BBC",
 				},
@@ -40,10 +42,10 @@ func TestDedupCluster_SameLink(t *testing.T) {
 }
 
 func TestDedupCluster_SameTitle(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/news/2",
 					Source: "中新网",
 				},
@@ -51,8 +53,8 @@ func TestDedupCluster_SameTitle(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/news/3", // different link
 					Source: "BBC",
 				},
@@ -67,10 +69,10 @@ func TestDedupCluster_SameTitle(t *testing.T) {
 }
 
 func TestDedupCluster_NoDuplicates(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/news/4",
 					Source: "中新网",
 				},
@@ -78,8 +80,8 @@ func TestDedupCluster_NoDuplicates(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/news/5",
 					Source: "BBC",
 				},
@@ -94,10 +96,10 @@ func TestDedupCluster_NoDuplicates(t *testing.T) {
 }
 
 func TestDedupCluster_ChainDuplicates(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/a",
 					Source: "中新网",
 				},
@@ -105,8 +107,8 @@ func TestDedupCluster_ChainDuplicates(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/b",
 					Source: "BBC",
 				},
@@ -114,8 +116,8 @@ func TestDedupCluster_ChainDuplicates(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/b", // same link as B
 					Source: "NPR",
 				},
@@ -130,19 +132,19 @@ func TestDedupCluster_ChainDuplicates(t *testing.T) {
 }
 
 func TestMergeExactDuplicates_CombinesLinks(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/a",
-					Source: "中新网",
+					Source: "央视新闻",
 				},
 				DisplayTitle: "标题X",
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/b",
 					Source: "BBC",
 				},
@@ -164,19 +166,19 @@ func TestMergeExactDuplicates_CombinesLinks(t *testing.T) {
 }
 
 func TestMergeExactDuplicates_KeepsDifferentItems(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/a",
-					Source: "中新网",
+					Source: "央视新闻",
 				},
 				DisplayTitle: "标题X",
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/b",
 					Source: "BBC",
 				},
@@ -192,20 +194,20 @@ func TestMergeExactDuplicates_KeepsDifferentItems(t *testing.T) {
 }
 
 func TestDedupAndLinkBatch_KeepsSimilarItems(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:    "https://example.com/a",
-					Source:  "中新网",
+					Source:  "央视新闻",
 					Summary: "摘要A",
 				},
 				DisplayTitle: "标题X",
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:    "https://example.com/b",
 					Source:  "BBC",
 					Summary: "摘要B",
@@ -214,8 +216,8 @@ func TestDedupAndLinkBatch_KeepsSimilarItems(t *testing.T) {
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:    "https://example.com/c",
 					Source:  "NPR",
 					Summary: "摘要C",
@@ -233,40 +235,40 @@ func TestDedupAndLinkBatch_KeepsSimilarItems(t *testing.T) {
 }
 
 func TestBuildDigest_ExcludesRefsFromFinalList(t *testing.T) {
-	items := []MergedNewsItem{
+	items := []types.MergedNewsItem{
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/a",
 					Source: "中新网",
 				},
-				DisplayTitle: "新闻A",
-				Category:     "战争与地缘",
+				DisplayTitle:  "新闻A",
+				Category:      "战争与地缘",
 				InterestScore: 10,
 			},
-			Refs: []NewsReference{
+			Refs: []types.NewsReference{
 				{DisplayTitle: "新闻B", Link: "https://example.com/b", Source: "BBC", RelationNote: "相关报道"},
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/b",
 					Source: "BBC",
 				},
-				DisplayTitle: "新闻B",
-				Category:     "战争与地缘",
+				DisplayTitle:  "新闻B",
+				Category:      "战争与地缘",
 				InterestScore: 9,
 			},
 		},
 		{
-			TaggedNewsItem: TaggedNewsItem{
-				RawNewsItem: RawNewsItem{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/c",
 					Source: "NPR",
 				},
-				DisplayTitle: "新闻C",
-				Category:     "战争与地缘",
+				DisplayTitle:  "新闻C",
+				Category:      "战争与地缘",
 				InterestScore: 8,
 			},
 		},

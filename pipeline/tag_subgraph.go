@@ -6,26 +6,18 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
-// tagSubGraphInput is the input to the tag sub-graph.
-// It carries both the template variables and the raw item index for result merging.
 type tagSubGraphInput = map[string]any
 
-// buildTagSubGraph creates a compiled eino sub-graph for the tagging stage:
-//
-//	FormatTagPrompt → TagTemplate → TagChatModel → ParseTagResult
-//
-// Input:  map[string]any  (template variables: news_items, categories, tagging_guide, tagging_examples, total_count)
-// Output: []TaggedNewsItem
-func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[map[string]any, []TaggedNewsItem], error) {
-	g := compose.NewGraph[map[string]any, []TaggedNewsItem](
+func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[map[string]any, []types.TaggedNewsItem], error) {
+	g := compose.NewGraph[map[string]any, []types.TaggedNewsItem](
 		compose.WithGenLocalState(func(ctx context.Context) *tagSubGraphState {
 			return &tagSubGraphState{}
 		}),
 	)
 
-	// Node: TagPromptTemplate
 	tagTpl, err := p.newTagChatTemplate()
 	if err != nil {
 		return nil, fmt.Errorf("create tag template: %w", err)
@@ -36,7 +28,6 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 		return nil, err
 	}
 
-	// Node: TagChatModel (use TagChatModel if set, otherwise fallback to ChatModel)
 	tagCM := p.TagChatModel
 	if tagCM == nil {
 		tagCM = p.ChatModel
@@ -47,7 +38,6 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 		return nil, err
 	}
 
-	// Node: ParseTagResult — Lambda
 	if err := g.AddLambdaNode("ParseTagResult",
 		compose.InvokableLambda(p.parseTagResultFromMessage),
 		compose.WithNodeName("解析标注结果"),
@@ -55,7 +45,6 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 		return nil, err
 	}
 
-	// Edges
 	edges := [][2]string{
 		{compose.START, "TagTemplate"},
 		{"TagTemplate", "TagChatModel"},
@@ -75,14 +64,11 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 	return r, nil
 }
 
-// tagSubGraphState holds state for the tag sub-graph (reserved for future use).
 type tagSubGraphState struct{}
 
-// parseTagResultFromMessage wraps parseTagResultFromMessage for use as a Lambda node.
-func (p *NewsPipeline) parseTagResultFromMessage(ctx context.Context, msg *schema.Message) ([]TaggedNewsItem, error) {
-	// Read rawByID from the parent graph's PipelineState
-	rawByID := make(map[string]RawNewsItem)
-	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+func (p *NewsPipeline) parseTagResultFromMessage(ctx context.Context, msg *schema.Message) ([]types.TaggedNewsItem, error) {
+	rawByID := make(map[string]types.RawNewsItem)
+	_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
 		for _, raw := range state.RawItems {
 			rawByID[raw.ID] = raw
 		}

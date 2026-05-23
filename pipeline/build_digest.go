@@ -9,20 +9,23 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/compose"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
+
+	fetchrss "github.com/litousteven/news-summary-agent/pipeline/fetch_rss"
 )
 
 // buildDigest selects, ranks, and formats news items into a digest.
-func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) (*DigestData, error) {
+func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNewsItem) (*types.DigestData, error) {
 	merged := p.dedupAndLinkBatch(ctx, items)
 
-	candidates := make([]MergedNewsItem, 0)
+	candidates := make([]types.MergedNewsItem, 0)
 	for _, item := range merged {
 		if !item.SeenBefore {
 			candidates = append(candidates, item)
 		}
 	}
 
-	byCategory := make(map[string][]MergedNewsItem)
+	byCategory := make(map[string][]types.MergedNewsItem)
 	for _, item := range candidates {
 		cat := item.Category
 		if cat == "" {
@@ -37,17 +40,17 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 			if si != sj {
 				return si > sj
 			}
-			ri := SourceRank[byCategory[cat][i].Source]
-			rj := SourceRank[byCategory[cat][j].Source]
+			ri := fetchrss.SourceRank[byCategory[cat][i].Source]
+			rj := fetchrss.SourceRank[byCategory[cat][j].Source]
 			return ri < rj
 		})
 	}
 
 	// First pass: select candidates per category
 	selectedLinks := make(map[string]bool)
-	var digestItems []DigestItem
+	var digestItems []types.DigestItem
 	catCount := make(map[string]int)
-	for _, cat := range CategoryOrder {
+	for _, cat := range types.CategoryOrder {
 		items, ok := byCategory[cat]
 		if !ok {
 			continue
@@ -63,7 +66,7 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 				continue
 			}
 			fp := buildFactParagraph(item)
-			digestItems = append(digestItems, DigestItem{
+			digestItems = append(digestItems, types.DigestItem{
 				MergedNewsItem: item,
 				FactParagraph:  fp,
 			})
@@ -76,7 +79,7 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 	}
 
 	// Second pass: remove items that are now referenced by higher-priority selected items
-	finalItems := make([]DigestItem, 0, len(digestItems))
+	finalItems := make([]types.DigestItem, 0, len(digestItems))
 	referencedLinks := make(map[string]bool)
 	for _, item := range digestItems {
 		for _, ref := range item.MergedNewsItem.Refs {
@@ -96,7 +99,7 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 
 	var taggingFailed int
 	var originalFetchedCount, actualTaggedCount int
-	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+	_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
 		originalFetchedCount = state.OriginalFetchedCount
 		actualTaggedCount = state.ActualTaggedCount
 		return nil
@@ -105,23 +108,23 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 		taggingFailed = originalFetchedCount - actualTaggedCount
 	}
 
-	stats := DigestStats{
-		TotalFetched:   originalFetchedCount,
-		TotalTagged:    actualTaggedCount,
-		TaggingFailed:  taggingFailed,
-		TotalSelected:  len(digestItems),
-		ByCategory:     catCount,
+	stats := types.DigestStats{
+		TotalFetched:  originalFetchedCount,
+		TotalTagged:   actualTaggedCount,
+		TaggingFailed: taggingFailed,
+		TotalSelected: len(digestItems),
+		ByCategory:    catCount,
 	}
 
 	slotLabel := getSlotLabel()
-	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+	_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
 		if state.Slot != "" {
 			slotLabel = slotToLabel(state.Slot)
 		}
 		return nil
 	})
 
-	return &DigestData{
+	return &types.DigestData{
 		Items:       digestItems,
 		SlotLabel:   slotLabel,
 		CurrentTime: currentTimeStr(),
@@ -130,7 +133,7 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []MergedNewsItem) 
 }
 
 // buildFactParagraph constructs a fact paragraph from a news item.
-func buildFactParagraph(item MergedNewsItem) string {
+func buildFactParagraph(item types.MergedNewsItem) string {
 	title := cleanText(item.DisplayTitle)
 	if title == "" {
 		title = cleanText(item.Title)
@@ -167,9 +170,9 @@ func formatPublishTime(pub string) string {
 		return ""
 	}
 	for _, format := range []string{
-		time.RFC1123,          // "Mon, 02 Jan 2006 15:04:05 MST"
-		time.RFC1123Z,         // "Mon, 02 Jan 2006 15:04:05 -0700"
-		time.RFC3339,          // "2006-01-02T15:04:05Z07:00"
+		time.RFC1123,  // "Mon, 02 Jan 2006 15:04:05 MST"
+		time.RFC1123Z, // "Mon, 02 Jan 2006 15:04:05 -0700"
+		time.RFC3339,  // "2006-01-02T15:04:05Z07:00"
 		"2006-01-02T15:04:05Z",
 		"2006-01-02 15:04:05",
 	} {
