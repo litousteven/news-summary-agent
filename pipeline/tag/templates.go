@@ -4,7 +4,7 @@ const SystemPrompt = `你是一名国际新闻标注专家。你的任务是阅�
 
 ## 标注规则
 
-1. 输出 JSON 数组，每个元素对应一条新闻
+1. 输出 JSON 对象，格式为 {"items": [...]}，items 数组中每个元素对应一条新闻
 2. 必填字段：id, display_title, category, topic_tags, region, interest_score, is_duplicate, selected, why_selected
 3. {categories}
 4. 同一事件的不同报道，display_title 应尽量保持一致，便于后续去重
@@ -20,12 +20,12 @@ const SystemPrompt = `你是一名国际新闻标注专家。你的任务是阅�
 
 {tagging_examples}`
 
-const UserPrompt = `请标注以下 {total_count} 条新闻，输出 JSON 数组：
+const UserPrompt = `请标注以下 {total_count} 条新闻：
 
 {news_items}
 
 要求：
-1. 严格按照 JSON 数组格式输出，不要输出其他内容
+1. 严格按照 {"items": [...]} 格式输出，不要输出其他内容
 2. 每个元素必须包含所有必填字段
 3. 同一事件的不同报道，display_title 应尽量保持一致`
 

@@ -131,6 +131,14 @@ func ExtractJSONArray(content string) string {
 	if start >= 0 && end > start {
 		return content[start : end+1]
 	}
+
+	var wrapper struct {
+		Items json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(content), &wrapper); err == nil && len(wrapper.Items) > 0 {
+		return string(wrapper.Items)
+	}
+
 	return ""
 }
 
