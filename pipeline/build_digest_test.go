@@ -157,8 +157,8 @@ func TestMergeExactDuplicates_CombinesLinks(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 merged item, got %d", len(result))
 	}
-	if result[0].Source != "中新网" {
-		t.Errorf("expected source 中新网, got %s", result[0].Source)
+	if result[0].Source != "央视新闻" {
+		t.Errorf("expected source 央视新闻, got %s", result[0].Source)
 	}
 	if len(result[0].Links) != 2 {
 		t.Errorf("expected 2 links, got %d: %v", len(result[0].Links), result[0].Links)
