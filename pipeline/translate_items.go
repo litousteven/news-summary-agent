@@ -8,6 +8,9 @@ import (
 	"sync"
 
 	"github.com/cloudwego/eino/schema"
+
+	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 type translateResult struct {
@@ -15,7 +18,7 @@ type translateResult struct {
 	Summary string `json:"summary"`
 }
 
-func (p *NewsPipeline) TranslateItems(ctx context.Context, data *DigestData) (*DigestData, error) {
+func (p *NewsPipeline) TranslateItems(ctx context.Context, data *types.DigestData) (*types.DigestData, error) {
 	log.Printf("[TranslateItems] Start, total items: %d", len(data.Items))
 	if p.ChatModel == nil {
 		log.Printf("[TranslateItems] ChatModel is nil, skipping")
@@ -144,7 +147,7 @@ func buildSingleTranslatePrompt(title, summary string) string {
 func parseTranslateResponse(content string) *translateResult {
 	var result translateResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		extracted := extractJSONFromMarkdown(content)
+		extracted := tagpkg.ExtractJSONFromMarkdown(content)
 		if extracted != "" {
 			if err2 := json.Unmarshal([]byte(extracted), &result); err2 != nil {
 				return nil

@@ -3,11 +3,14 @@ package pipeline
 import (
 	"context"
 	"strings"
+
+	fetchrss "github.com/litousteven/news-summary-agent/pipeline/fetch_rss"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 // DedupCluster groups items that share the same link or display_title using union-find.
 // Returns a map of clusterRoot -> list of item indices.
-func DedupCluster(items []MergedNewsItem) map[int][]int {
+func DedupCluster(items []types.MergedNewsItem) map[int][]int {
 	parent := make([]int, len(items))
 	for i := range parent {
 		parent[i] = i
@@ -63,8 +66,8 @@ func DedupCluster(items []MergedNewsItem) map[int][]int {
 
 // MergeExactDuplicates merges items with the same link or display_title into a single item.
 // The merged item combines links from all sources and keeps the best source rank.
-func MergeExactDuplicates(items []MergedNewsItem, clusters map[int][]int) []MergedNewsItem {
-	result := make([]MergedNewsItem, 0, len(clusters))
+func MergeExactDuplicates(items []types.MergedNewsItem, clusters map[int][]int) []types.MergedNewsItem {
+	result := make([]types.MergedNewsItem, 0, len(clusters))
 	for _, indices := range clusters {
 		if len(indices) == 1 {
 			result = append(result, items[indices[0]])
@@ -73,9 +76,9 @@ func MergeExactDuplicates(items []MergedNewsItem, clusters map[int][]int) []Merg
 
 		best := indices[0]
 		for _, idx := range indices[1:] {
-			if SourceRank[items[idx].Source] < SourceRank[items[best].Source] {
+			if fetchrss.SourceRank[items[idx].Source] < fetchrss.SourceRank[items[best].Source] {
 				best = idx
-			} else if SourceRank[items[idx].Source] == SourceRank[items[best].Source] && items[idx].InterestScore > items[best].InterestScore {
+			} else if fetchrss.SourceRank[items[idx].Source] == fetchrss.SourceRank[items[best].Source] && items[idx].InterestScore > items[best].InterestScore {
 				best = idx
 			}
 		}
@@ -99,7 +102,7 @@ func MergeExactDuplicates(items []MergedNewsItem, clusters map[int][]int) []Merg
 
 // FindSimilarItems finds semantically similar items and creates Refs between them.
 // This does NOT merge items; all items remain independent, but are linked via Refs.
-func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []MergedNewsItem) {
+func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []types.MergedNewsItem) {
 	if p.Embedding == nil || len(items) <= 1 {
 		return
 	}
@@ -117,14 +120,14 @@ func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []MergedNewsIt
 		for j := i + 1; j < len(items); j++ {
 			sim := cosineSimilarity(vecs[i], vecs[j])
 			if sim >= p.GetClusterThreshold() && sim < 1.0 {
-				refA := NewsReference{
+				refA := types.NewsReference{
 					DisplayTitle: items[j].DisplayTitle,
 					Source:       items[j].Source,
 					Link:         items[j].Link,
 					Similarity:   sim,
 					RelationNote: "相关",
 				}
-				refB := NewsReference{
+				refB := types.NewsReference{
 					DisplayTitle: items[i].DisplayTitle,
 					Source:       items[i].Source,
 					Link:         items[i].Link,
@@ -138,7 +141,7 @@ func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []MergedNewsIt
 	}
 }
 
-func (p *NewsPipeline) dedupAndLinkBatch(ctx context.Context, items []MergedNewsItem) []MergedNewsItem {
+func (p *NewsPipeline) dedupAndLinkBatch(ctx context.Context, items []types.MergedNewsItem) []types.MergedNewsItem {
 	clusters := DedupCluster(items)
 	merged := MergeExactDuplicates(items, clusters)
 	FindSimilarItems(ctx, p, merged)

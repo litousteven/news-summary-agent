@@ -6,20 +6,19 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"regexp"
 	"strings"
 
 	"github.com/cloudwego/eino/schema"
+
+	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
-// updateTaggingGuide analyzes the tagged news items from this run and uses the LLM
-// to suggest updates to the category definitions in categories.json.
-func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *NewsSummaryResult) (*NewsSummaryResult, error) {
+func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *types.NewsSummaryResult) (*types.NewsSummaryResult, error) {
 	if len(result.DigestItems) == 0 {
 		return result, nil
 	}
 
-	// Build a summary of categories and topic_tags from this run
 	categoryCounts := make(map[string]int)
 	var allTags []string
 	tagSet := make(map[string]bool)
@@ -37,19 +36,16 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *NewsSumma
 		}
 	}
 
-	// Build current category distribution summary
 	var statsBuilder strings.Builder
-	for _, cat := range CategoryOrder {
+	for _, cat := range types.CategoryOrder {
 		if count, ok := categoryCounts[cat]; ok {
 			statsBuilder.WriteString(fmt.Sprintf("- %s: %d条\n", cat, count))
 		}
 	}
 
-	// Load current categories and build a text representation for the prompt
 	currentCategories, _ := p.loadCategories()
 	categoriesText := formatCategoriesForPrompt(currentCategories)
 
-	// Build prompt for LLM to analyze if categories need updating
 	prompt := fmt.Sprintf(`你是一名新闻分类体系分析师。根据本次收集的新闻数据，分析当前分类体系是否需要调整。
 
 ## 当前分类枚举
@@ -79,7 +75,7 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *NewsSumma
 {"add": [{"name": "新分类名", "keywords": ["关键词1", "关键词2"], "boundary": "适合的分类边界说明", "not_boundary": "不适合归入的情况说明"}], "remove": ["要删除的分类名"], "split": [{"from": "原分类名", "into": [{"name": "新分类1", "keywords": ["..."], "boundary": "...", "not_boundary": "..."}]}], "merge": [{"from": ["分类A", "分类B"], "into": {"name": "合并后名称", "keywords": ["..."], "boundary": "...", "not_boundary": "..."}}]}
 
 注意：只输出需要变更的部分，不需要变更的不要列出。不要输出分析过程。`,
-		strings.Join(CategoryOrder, "、"),
+		strings.Join(types.CategoryOrder, "、"),
 		statsBuilder.String(),
 		strings.Join(allTags, "、"),
 		categoriesText)
@@ -92,7 +88,7 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *NewsSumma
 	resp, err := p.ChatModel.Generate(ctx, messages)
 	if err != nil {
 		log.Printf("[UpdateTaggingGuide] LLM调用失败: %v", err)
-		return result, nil // non-fatal
+		return result, nil
 	}
 
 	suggestion := strings.TrimSpace(resp.Content)
@@ -103,8 +99,7 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *NewsSumma
 
 	log.Printf("[UpdateTaggingGuide] 收到分类调整建议:\n%s", suggestion)
 
-	// Parse the suggestion and apply changes to categories.json
-	changes, err := parseCategoryChanges(suggestion)
+	changes, err := tagpkg.ParseCategoryChanges(suggestion)
 	if err != nil {
 		log.Printf("[UpdateTaggingGuide] 解析分类调整建议失败: %v", err)
 		return result, nil
@@ -119,69 +114,18 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *NewsSumma
 	return result, nil
 }
 
-// categoryChanges represents parsed LLM suggestions for category modifications.
-type categoryChanges struct {
-	Add    []CategoryDef `json:"add"`
-	Remove []string      `json:"remove"`
-	Split  []splitChange `json:"split"`
-	Merge  []mergeChange `json:"merge"`
-}
-
-type splitChange struct {
-	From string        `json:"from"`
-	Into []CategoryDef `json:"into"`
-}
-
-type mergeChange struct {
-	From []string    `json:"from"`
-	Into CategoryDef `json:"into"`
-}
-
-// parseCategoryChanges extracts the JSON from the LLM response and parses it.
-func parseCategoryChanges(suggestion string) (*categoryChanges, error) {
-	// Try direct JSON parse first
-	var changes categoryChanges
-	if err := json.Unmarshal([]byte(suggestion), &changes); err == nil {
-		return &changes, nil
-	}
-
-	// Try extracting JSON from markdown code block
-	re := regexp.MustCompile("(?s)```(?:json)?\\s*\\n(.*?)\\n```")
-	matches := re.FindStringSubmatch(suggestion)
-	if len(matches) >= 2 {
-		if err := json.Unmarshal([]byte(matches[1]), &changes); err == nil {
-			return &changes, nil
-		}
-	}
-
-	// Try finding JSON object in the text
-	start := strings.Index(suggestion, "{")
-	end := strings.LastIndex(suggestion, "}")
-	if start >= 0 && end > start {
-		if err := json.Unmarshal([]byte(suggestion[start:end+1]), &changes); err == nil {
-			return &changes, nil
-		}
-	}
-
-	return nil, fmt.Errorf("failed to parse category changes from LLM response")
-}
-
-// applyCategoryChanges modifies the categories list and writes it to categories.json.
-func (p *NewsPipeline) applyCategoryChanges(currentCategories []CategoryDef, changes *categoryChanges) error {
+func (p *NewsPipeline) applyCategoryChanges(currentCategories []types.CategoryDef, changes *tagpkg.CategoryChanges) error {
 	if len(changes.Add) == 0 && len(changes.Remove) == 0 && len(changes.Split) == 0 && len(changes.Merge) == 0 {
 		return nil
 	}
 
-	// Build a map of current categories by name for easy lookup
-	catMap := make(map[string]CategoryDef, len(currentCategories))
-	// Preserve order
+	catMap := make(map[string]types.CategoryDef, len(currentCategories))
 	catOrder := make([]string, len(currentCategories))
 	for i, c := range currentCategories {
 		catMap[c.Name] = c
 		catOrder[i] = c.Name
 	}
 
-	// Apply removals
 	removeSet := make(map[string]bool)
 	for _, name := range changes.Remove {
 		removeSet[name] = true
@@ -189,37 +133,47 @@ func (p *NewsPipeline) applyCategoryChanges(currentCategories []CategoryDef, cha
 		log.Printf("[UpdateTaggingGuide] 删除分类: %s", name)
 	}
 
-	// Apply splits: remove the original, add the new ones
 	for _, s := range changes.Split {
 		delete(catMap, s.From)
 		removeSet[s.From] = true
 		for _, into := range s.Into {
-			catMap[into.Name] = into
+			catMap[into.Name] = types.CategoryDef{
+				Name:        into.Name,
+				Keywords:    into.Keywords,
+				Boundary:    into.Boundary,
+				NotBoundary: into.NotBoundary,
+			}
 			log.Printf("[UpdateTaggingGuide] 拆分分类 %s → %s", s.From, into.Name)
 		}
 	}
 
-	// Apply merges: remove the originals, add the merged one
 	for _, m := range changes.Merge {
 		mergedName := m.Into.Name
 		for _, from := range m.From {
 			delete(catMap, from)
 			removeSet[from] = true
 		}
-		catMap[mergedName] = m.Into
+		catMap[mergedName] = types.CategoryDef{
+			Name:        m.Into.Name,
+			Keywords:    m.Into.Keywords,
+			Boundary:    m.Into.Boundary,
+			NotBoundary: m.Into.NotBoundary,
+		}
 		log.Printf("[UpdateTaggingGuide] 合并分类 %v → %s", m.From, mergedName)
 	}
 
-	// Apply additions (before "其他重要动态")
 	for _, c := range changes.Add {
-		catMap[c.Name] = c
+		catMap[c.Name] = types.CategoryDef{
+			Name:        c.Name,
+			Keywords:    c.Keywords,
+			Boundary:    c.Boundary,
+			NotBoundary: c.NotBoundary,
+		}
 		log.Printf("[UpdateTaggingGuide] 新增分类: %s", c.Name)
 	}
 
-	// Rebuild ordered list: keep original order for surviving categories,
-	// append new categories before "其他重要动态"
-	var result []CategoryDef
-	var newCats []CategoryDef
+	var result []types.CategoryDef
+	var newCats []types.CategoryDef
 	for _, name := range catOrder {
 		if removeSet[name] {
 			continue
@@ -230,9 +184,7 @@ func (p *NewsPipeline) applyCategoryChanges(currentCategories []CategoryDef, cha
 		}
 	}
 
-	// Any remaining in catMap are new categories (from add/split/merge)
 	for name, c := range catMap {
-		// Check if this is a genuinely new category not yet in the result
 		found := false
 		for _, existing := range result {
 			if existing.Name == name {
@@ -245,9 +197,8 @@ func (p *NewsPipeline) applyCategoryChanges(currentCategories []CategoryDef, cha
 		}
 	}
 
-	// Insert new categories before "其他重要动态" if it exists
 	if len(newCats) > 0 {
-		finalResult := make([]CategoryDef, 0, len(result)+len(newCats))
+		finalResult := make([]types.CategoryDef, 0, len(result)+len(newCats))
 		inserted := false
 		for _, c := range result {
 			if c.Name == "其他重要动态" && !inserted {
@@ -262,10 +213,8 @@ func (p *NewsPipeline) applyCategoryChanges(currentCategories []CategoryDef, cha
 		result = finalResult
 	}
 
-	// Update runtime state
-	ReloadCategoryDefs(result)
+	types.ReloadCategoryDefs(result)
 
-	// Write to categories.json
 	path := p.ConfigDir + "/categories.json"
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {

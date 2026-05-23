@@ -1,4 +1,4 @@
-package pipeline
+package types
 
 type NewsSummaryRequest struct {
 	Slot string // "00:00" / "12:00" / "18:00"
@@ -124,15 +124,6 @@ type PipelineState struct {
 	ActualTaggedCount int
 }
 
-// RSS feed configuration
-type FeedSource struct {
-	Name     string `yaml:"name" json:"name"`
-	URL      string `yaml:"url" json:"url"`
-	Lang     string `yaml:"lang" json:"lang"`
-	UseProxy bool   `yaml:"use_proxy" json:"use_proxy"`
-	Enabled  bool   `yaml:"enabled" json:"enabled"`
-}
-
 // CategoryDef represents a single category definition loaded from categories.json.
 type CategoryDef struct {
 	Name        string   `json:"name"`
@@ -175,40 +166,6 @@ func ReloadCategoryDefs(defs []CategoryDef) {
 		CategoryOrder[i] = c.Name
 		ValidCategories[c.Name] = true
 	}
-}
-
-// Source ranking for dedup (lower = higher priority)
-var SourceRank = map[string]int{
-	"中新网":        0,
-	"BBC":        1,
-	"NPR":        2,
-	"NYT":        3,
-	"Al Jazeera": 4,
-}
-
-// Default RSS feeds (used when feeds.yaml is not found)
-// Only Enabled=true feeds are active.
-var DefaultFeeds = []FeedSource{
-	{Name: "中新网", URL: "https://www.chinanews.com.cn/rss/world.xml", Lang: "zh", Enabled: true},
-	{Name: "BBC", URL: "https://feeds.bbci.co.uk/news/world/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
-	{Name: "NPR", URL: "https://feeds.npr.org/1004/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
-	{Name: "NYT", URL: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", Lang: "en", UseProxy: true, Enabled: true},
-	{Name: "联合早报", URL: "https://plink.anyfeeder.com/zaobao/realtime/world", Lang: "zh", Enabled: true},
-	{Name: "联合早报-中国", URL: "https://plink.anyfeeder.com/zaobao/realtime/china", Lang: "zh", Enabled: true},
-	// Candidate sources (disabled by default)
-	{Name: "香港电台", URL: "https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml", Lang: "zh"},
-	{Name: "CNN", URL: "http://rss.cnn.com/rss/edition.rss", Lang: "en"},
-	{Name: "Washington Post", URL: "https://feeds.washingtonpost.com/rss/world", Lang: "en", UseProxy: true},
-	{Name: "NBC News", URL: "https://feeds.nbcnews.com/nbcnews/public/news", Lang: "en", UseProxy: true},
-	{Name: "ABC News", URL: "https://abcnews.go.com/abcnews/topstories", Lang: "en", UseProxy: true},
-	{Name: "FOX News", URL: "https://moxie.foxnews.com/google-publisher/world.xml", Lang: "en", UseProxy: true},
-	{Name: "The Guardian", URL: "https://www.theguardian.com/world/rss", Lang: "en", UseProxy: true},
-	{Name: "Financial Times", URL: "https://www.ft.com/rss/home", Lang: "en", UseProxy: true},
-	{Name: "The Independent", URL: "https://www.independent.co.uk/rss", Lang: "en", UseProxy: true},
-	{Name: "Sky News", URL: "https://feeds.skynews.com/feeds/rss/world.xml", Lang: "en", UseProxy: true},
-	{Name: "France24", URL: "https://www.france24.com/en/rss", Lang: "en", UseProxy: true},
-	{Name: "DW", URL: "https://rss.dw.com/rdf/rss-en-all", Lang: "en", UseProxy: true},
-	{Name: "Japan Times", URL: "https://www.japantimes.co.jp/feed/", Lang: "en", UseProxy: true},
 }
 
 // Default constants (used when PipelineConfig fields are zero)

@@ -9,6 +9,8 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	"gopkg.in/yaml.v3"
+
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 const (
@@ -75,77 +77,77 @@ type NewsPipeline struct {
 // Getters with defaults
 func (p *NewsPipeline) GetMaxItemsPerFeed() int {
 	if p.Config.MaxItemsPerFeed <= 0 {
-		return DefaultMaxItemsPerFeed
+		return types.DefaultMaxItemsPerFeed
 	}
 	return p.Config.MaxItemsPerFeed
 }
 
 func (p *NewsPipeline) GetMaxTotalItems() int {
 	if p.Config.MaxTotalItems <= 0 {
-		return DefaultMaxTotalItems
+		return types.DefaultMaxTotalItems
 	}
 	return p.Config.MaxTotalItems
 }
 
 func (p *NewsPipeline) GetMaxDigestItems() int {
 	if p.Config.MaxDigestItems <= 0 {
-		return DefaultMaxDigestItems
+		return types.DefaultMaxDigestItems
 	}
 	return p.Config.MaxDigestItems
 }
 
 func (p *NewsPipeline) GetMaxPerCategory() int {
 	if p.Config.MaxPerCategory <= 0 {
-		return DefaultMaxPerCategory
+		return types.DefaultMaxPerCategory
 	}
 	return p.Config.MaxPerCategory
 }
 
 func (p *NewsPipeline) GetClusterThreshold() float64 {
 	if p.Config.ClusterThreshold <= 0 {
-		return DefaultClusterThreshold
+		return types.DefaultClusterThreshold
 	}
 	return p.Config.ClusterThreshold
 }
 
 func (p *NewsPipeline) GetFileExpiryDays() int {
 	if p.Config.FileExpiryDays <= 0 {
-		return DefaultFileExpiryDays
+		return types.DefaultFileExpiryDays
 	}
 	return p.Config.FileExpiryDays
 }
 
 func (p *NewsPipeline) GetTagBatchSize() int {
 	if p.Config.TagBatchSize <= 0 {
-		return DefaultTagBatchSize
+		return types.DefaultTagBatchSize
 	}
 	return p.Config.TagBatchSize
 }
 
 func (p *NewsPipeline) GetTagMaxConcurrentBatches() int {
 	if p.Config.TagMaxConcurrentBatches <= 0 {
-		return DefaultTagMaxConcurrentBatches
+		return types.DefaultTagMaxConcurrentBatches
 	}
 	return p.Config.TagMaxConcurrentBatches
 }
 
 func (p *NewsPipeline) GetTagMaxRetries() int {
 	if p.Config.TagMaxRetries <= 0 {
-		return DefaultTagMaxRetries
+		return types.DefaultTagMaxRetries
 	}
 	return p.Config.TagMaxRetries
 }
 
 func (p *NewsPipeline) GetTagRetryBaseDelaySeconds() int {
 	if p.Config.TagRetryBaseDelaySeconds <= 0 {
-		return DefaultTagRetryBaseDelaySeconds
+		return types.DefaultTagRetryBaseDelaySeconds
 	}
 	return p.Config.TagRetryBaseDelaySeconds
 }
 
 func (p *NewsPipeline) GetTagBatchTimeoutSeconds() int {
 	if p.Config.TagBatchTimeoutSeconds <= 0 {
-		return DefaultTagBatchTimeoutSeconds
+		return types.DefaultTagBatchTimeoutSeconds
 	}
 	return p.Config.TagBatchTimeoutSeconds
 }
@@ -157,10 +159,10 @@ type EmbeddingClient interface {
 }
 
 // BuildGraph constructs the 11-node Eino Graph as documented in README.
-func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSummaryRequest, *NewsSummaryResult], error) {
-	g := compose.NewGraph[*NewsSummaryRequest, *NewsSummaryResult](
-		compose.WithGenLocalState(func(ctx context.Context) *PipelineState {
-			return &PipelineState{}
+func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*types.NewsSummaryRequest, *types.NewsSummaryResult], error) {
+	g := compose.NewGraph[*types.NewsSummaryRequest, *types.NewsSummaryResult](
+		compose.WithGenLocalState(func(ctx context.Context) *types.PipelineState {
+			return &types.PipelineState{}
 		}),
 	)
 
@@ -169,7 +171,7 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 	if err := g.AddLambdaNode(NodeFetchRSS,
 		compose.InvokableLambda(p.fetchRSS),
 		compose.WithNodeName("抓取RSS新闻"),
-		compose.WithStatePostHandler(func(ctx context.Context, out []RawNewsItem, state *PipelineState) ([]RawNewsItem, error) {
+		compose.WithStatePostHandler(func(ctx context.Context, out []types.RawNewsItem, state *types.PipelineState) ([]types.RawNewsItem, error) {
 			state.RawItems = out
 			return out, nil
 		}),
@@ -198,7 +200,7 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 	if err := g.AddLambdaNode(NodeBuildDigest,
 		compose.InvokableLambda(p.buildDigest),
 		compose.WithNodeName("编排摘要"),
-		compose.WithStatePostHandler(func(ctx context.Context, out *DigestData, state *PipelineState) (*DigestData, error) {
+		compose.WithStatePostHandler(func(ctx context.Context, out *types.DigestData, state *types.PipelineState) (*types.DigestData, error) {
 			state.DigestItems = out.Items
 			state.DigestStats = &out.Stats
 			return out, nil
@@ -212,7 +214,7 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 	if err := g.AddLambdaNode(NodeTranslateItems,
 		compose.InvokableLambda(p.TranslateItems),
 		compose.WithNodeName("翻译外语新闻"),
-		compose.WithStatePostHandler(func(ctx context.Context, out *DigestData, state *PipelineState) (*DigestData, error) {
+		compose.WithStatePostHandler(func(ctx context.Context, out *types.DigestData, state *types.PipelineState) (*types.DigestData, error) {
 			state.DigestItems = out.Items
 			return out, nil
 		}),
@@ -225,7 +227,7 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 	if err := g.AddLambdaNode(NodeSummarizePerItem,
 		compose.InvokableLambda(p.summarizePerItem),
 		compose.WithNodeName("逐条生成摘要"),
-		compose.WithStatePostHandler(func(ctx context.Context, out *DigestData, state *PipelineState) (*DigestData, error) {
+		compose.WithStatePostHandler(func(ctx context.Context, out *types.DigestData, state *types.PipelineState) (*types.DigestData, error) {
 			state.DigestItems = out.Items
 			return out, nil
 		}),
@@ -276,7 +278,7 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 	return r, nil
 }
 
-func (p *NewsPipeline) Run(ctx context.Context, req *NewsSummaryRequest) (*NewsSummaryResult, error) {
+func (p *NewsPipeline) Run(ctx context.Context, req *types.NewsSummaryRequest) (*types.NewsSummaryResult, error) {
 	r, err := p.BuildGraph(ctx)
 	if err != nil {
 		return nil, err

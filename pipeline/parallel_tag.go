@@ -12,19 +12,18 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+
+	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
-// parallelTagItems splits raw news items into batches, tags each batch
-// concurrently via the tag sub-graph, and merges the results.
-// Uses a per-day tag cache to avoid re-tagging already processed items.
-func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem) ([]TaggedNewsItem, error) {
+func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []types.RawNewsItem) ([]types.TaggedNewsItem, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
 
-	// Load cached tag results for today
 	cached := p.loadTagCache()
-	cachedByLink := make(map[string]TaggedNewsItem, len(cached))
+	cachedByLink := make(map[string]types.TaggedNewsItem, len(cached))
 	for _, item := range cached {
 		link := strings.TrimSpace(item.Link)
 		if link != "" {
@@ -32,9 +31,8 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 		}
 	}
 
-	// Split into cached and new items
-	var newItems []RawNewsItem
-	var taggedFromCache []TaggedNewsItem
+	var newItems []types.RawNewsItem
+	var taggedFromCache []types.TaggedNewsItem
 	for _, item := range items {
 		link := strings.TrimSpace(item.Link)
 		if link != "" {
@@ -50,8 +48,7 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 		log.Printf("[ParallelTag] 命中缓存: %d 条，待标注: %d 条", len(taggedFromCache), len(newItems))
 	}
 
-	// Tag only the new items
-	var taggedNew []TaggedNewsItem
+	var taggedNew []types.TaggedNewsItem
 	if len(newItems) > 0 {
 		result, err := p.tagNewItems(ctx, newItems)
 		if err != nil {
@@ -59,24 +56,21 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 		}
 		taggedNew = result
 
-		// Append new results to cache
 		if err := p.appendTagCache(taggedNew); err != nil {
 			log.Printf("[ParallelTag] 写入标签缓存失败: %v", err)
 		}
 	}
 
-	// Merge cached + newly tagged
-	allTagged := make([]TaggedNewsItem, 0, len(taggedFromCache)+len(taggedNew))
+	allTagged := make([]types.TaggedNewsItem, 0, len(taggedFromCache)+len(taggedNew))
 	allTagged = append(allTagged, taggedFromCache...)
 	allTagged = append(allTagged, taggedNew...)
 
 	log.Printf("[ParallelTag] 完成: 缓存 %d + 新标注 %d = %d/%d 条",
 		len(taggedFromCache), len(taggedNew), len(allTagged), len(items))
 
-	// Save counts to pipeline state for final stats
 	fetchedCount := len(items)
 	taggedCount := len(allTagged)
-	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
+	_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
 		state.OriginalFetchedCount = fetchedCount
 		state.ActualTaggedCount = taggedCount
 		return nil
@@ -85,19 +79,13 @@ func (p *NewsPipeline) parallelTagItems(ctx context.Context, items []RawNewsItem
 	return allTagged, nil
 }
 
-// tagNewItems performs LLM tagging on items that are not in the cache.
-// It splits items into batches and runs the tag sub-graph concurrently for each batch
-// with a concurrency limiter, per-batch timeout, and retry with exponential backoff.
-// Failed batches after all retries are logged and their items are dropped.
-func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]TaggedNewsItem, error) {
-	// Build the tag sub-graph once (shared across all batches)
+func (p *NewsPipeline) tagNewItems(ctx context.Context, items []types.RawNewsItem) ([]types.TaggedNewsItem, error) {
 	tagGraph, err := p.buildTagSubGraph(ctx)
 	if err != nil {
 		log.Printf("[ParallelTag] 构建TagSubGraph失败: error=%v", err)
 		return nil, fmt.Errorf("build tag sub-graph: %w", err)
 	}
 
-	// Load prompt content once (shared across batches)
 	categories, _ := p.loadCategories()
 	categoriesText := formatCategoriesForPrompt(categories)
 	guide, err := p.loadTaggingGuide()
@@ -111,37 +99,34 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 		return nil, fmt.Errorf("load tagging examples: %w", err)
 	}
 
-	// Split into batches
-	batches := splitBatches(items, p.GetTagBatchSize())
+	batchItems := toBatchItems(items)
+	batches := tagpkg.SplitBatches(batchItems, p.GetTagBatchSize())
 
 	type batchResult struct {
-		items []TaggedNewsItem
+		items []types.TaggedNewsItem
 		err   error
 		index int
 	}
 
 	results := make([]batchResult, len(batches))
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, p.GetTagMaxConcurrentBatches()) // concurrency limiter
+	sem := make(chan struct{}, p.GetTagMaxConcurrentBatches())
 
-	// Read tag config once for use in goroutines
 	maxRetries := p.GetTagMaxRetries()
 	retryBaseDelay := time.Duration(p.GetTagRetryBaseDelaySeconds()) * time.Second
 	batchTimeout := time.Duration(p.GetTagBatchTimeoutSeconds()) * time.Second
 
 	for i, batch := range batches {
 		wg.Add(1)
-		go func(idx int, b []RawNewsItem) {
+		go func(idx int, b []tagpkg.BatchItem) {
 			defer wg.Done()
 
-			// Acquire semaphore
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			vars := p.formatBatchTagPromptVars(b, categoriesText, guide, examples)
+			vars := tagpkg.FormatBatchTagPromptVars(b, categoriesText, guide, examples)
 
-			// Retry loop with exponential backoff
-			var tagged []TaggedNewsItem
+			var tagged []types.TaggedNewsItem
 			var lastErr error
 		retryLoop:
 			for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -157,13 +142,12 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 					}
 				}
 
-				// Create a per-attempt timeout context
 				batchCtx, cancel := context.WithTimeout(ctx, batchTimeout)
 				tagged, lastErr = tagGraph.Invoke(batchCtx, vars)
 				cancel()
 
 				if lastErr == nil {
-					break // success
+					break
 				}
 				newsItemsStr, _ := vars["news_items"].(string)
 				truncatedItems := newsItemsStr
@@ -188,8 +172,7 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	}
 	wg.Wait()
 
-	// Merge results in order (failed batches are skipped)
-	var allTagged []TaggedNewsItem
+	var allTagged []types.TaggedNewsItem
 	for _, r := range results {
 		if r.err != nil {
 			continue
@@ -205,8 +188,7 @@ func (p *NewsPipeline) tagNewItems(ctx context.Context, items []RawNewsItem) ([]
 	return allTagged, nil
 }
 
-// loadTagCache reads the per-day tag cache file.
-func (p *NewsPipeline) loadTagCache() []TaggedNewsItem {
+func (p *NewsPipeline) loadTagCache() []types.TaggedNewsItem {
 	today := time.Now().Format("20060102")
 	path := p.DataDir + "/tagged_cache_" + today + ".jsonl"
 	data, err := os.ReadFile(path)
@@ -214,13 +196,13 @@ func (p *NewsPipeline) loadTagCache() []TaggedNewsItem {
 		return nil
 	}
 
-	var items []TaggedNewsItem
+	var items []types.TaggedNewsItem
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		var item TaggedNewsItem
+		var item types.TaggedNewsItem
 		if err := json.Unmarshal([]byte(line), &item); err != nil {
 			continue
 		}
@@ -229,8 +211,7 @@ func (p *NewsPipeline) loadTagCache() []TaggedNewsItem {
 	return items
 }
 
-// appendTagCache appends newly tagged items to the per-day cache file.
-func (p *NewsPipeline) appendTagCache(items []TaggedNewsItem) error {
+func (p *NewsPipeline) appendTagCache(items []types.TaggedNewsItem) error {
 	today := time.Now().Format("20060102")
 	path := p.DataDir + "/tagged_cache_" + today + ".jsonl"
 
@@ -252,65 +233,26 @@ func (p *NewsPipeline) appendTagCache(items []TaggedNewsItem) error {
 	return nil
 }
 
-// formatBatchTagPromptVars builds template variables for one batch.
-func (p *NewsPipeline) formatBatchTagPromptVars(batch []RawNewsItem, categoriesText, guide, examples string) map[string]any {
-	var sb strings.Builder
-	for i, item := range batch {
-		sb.WriteString(fmt.Sprintf("### [%d] %s\n", i+1, item.Title))
-		sb.WriteString(fmt.Sprintf("- ID: %s\n", item.ID))
-		sb.WriteString(fmt.Sprintf("- 来源: %s (%s)\n", item.Source, item.Lang))
-		sb.WriteString(fmt.Sprintf("- 摘要: %s\n", item.Summary))
-		sb.WriteString(fmt.Sprintf("- 发布时间: %s\n", item.PublishedAt))
-		sb.WriteString(fmt.Sprintf("- 链接: %s\n\n", item.Link))
+func toBatchItems(items []types.RawNewsItem) []tagpkg.BatchItem {
+	result := make([]tagpkg.BatchItem, len(items))
+	for i, item := range items {
+		result[i] = tagpkg.BatchItem{
+			ID:          item.ID,
+			Source:      item.Source,
+			Lang:        item.Lang,
+			Title:       item.Title,
+			Summary:     item.Summary,
+			PublishedAt: item.PublishedAt,
+			Link:        item.Link,
+		}
 	}
-
-	return map[string]any{
-		"news_items":       sb.String(),
-		"categories":       categoriesText,
-		"tagging_guide":    guide,
-		"tagging_examples": examples,
-		"total_count":      fmt.Sprintf("%d", len(batch)),
-	}
+	return result
 }
 
-// parseTagResultFromMessage parses LLM output into TaggedNewsItems, merging raw fields.
-func parseTagResultFromMessage(msg *schema.Message, rawByID map[string]RawNewsItem) ([]TaggedNewsItem, error) {
-	content := msg.Content
-
-	var results []tagResultItem
-	err := json.Unmarshal([]byte(content), &results)
+func parseTagResultFromMessage(msg *schema.Message, rawByID map[string]types.RawNewsItem) ([]types.TaggedNewsItem, error) {
+	tagItems, err := tagpkg.ParseTagResultItems(msg.Content)
 	if err != nil {
-		extracted := extractJSONFromMarkdown(content)
-		if extracted != "" {
-			err = json.Unmarshal([]byte(extracted), &results)
-		}
-	}
-	if err != nil {
-		extracted := extractJSONArray(content)
-		if extracted != "" {
-			err = json.Unmarshal([]byte(extracted), &results)
-		}
-	}
-	if err != nil {
-		// JSON mode may return a single object instead of an array
-		var single tagResultItem
-		if err2 := json.Unmarshal([]byte(content), &single); err2 == nil {
-			results = []tagResultItem{single}
-			err = nil
-		}
-	}
-	if err != nil {
-		extracted := extractJSONArray(content)
-		if extracted != "" {
-			var single tagResultItem
-			if err2 := json.Unmarshal([]byte(extracted), &single); err2 == nil {
-				results = []tagResultItem{single}
-				err = nil
-			}
-		}
-	}
-	if err != nil {
-		contentPreview := content
+		contentPreview := msg.Content
 		if len(contentPreview) > 500 {
 			contentPreview = contentPreview[:500] + "..."
 		}
@@ -318,35 +260,32 @@ func parseTagResultFromMessage(msg *schema.Message, rawByID map[string]RawNewsIt
 		return nil, fmt.Errorf("failed to parse LLM tag output as JSON: %w", err)
 	}
 
-	tagged := make([]TaggedNewsItem, 0, len(results))
-	// Build title-to-raw index for fallback matching when ID doesn't match
-	rawByTitle := make(map[string]RawNewsItem, len(rawByID))
+	tagged := make([]types.TaggedNewsItem, 0, len(tagItems))
+	rawByTitle := make(map[string]types.RawNewsItem, len(rawByID))
 	for _, raw := range rawByID {
 		rawByTitle[raw.Title] = raw
 	}
 
-	for _, r := range results {
-		item := TaggedNewsItem{
-			RawNewsItem: RawNewsItem{
+	for _, r := range tagItems {
+		item := types.TaggedNewsItem{
+			RawNewsItem: types.RawNewsItem{
 				ID: r.ID,
 			},
 			DisplayTitle:  r.DisplayTitle,
-			Category:      normalizeCategory(r.Category),
-			TopicTags:     parseTopicTags(r.TopicTags),
+			Category:      normalizeCategoryInternal(r.Category),
+			TopicTags:     tagpkg.ParseTopicTags(r.TopicTags),
 			Region:        r.Region,
-			InterestScore: parseInterestScore(r.InterestScore),
-			IsDuplicate:   parseBool(r.IsDuplicate, false),
-			Selected:      parseBool(r.Selected, false),
+			InterestScore: tagpkg.ParseInterestScore(r.InterestScore),
+			IsDuplicate:   tagpkg.ParseBool(r.IsDuplicate, false),
+			Selected:      tagpkg.ParseBool(r.Selected, false),
 			WhySelected:   r.WhySelected,
 		}
 
-		// Merge raw fields: try ID match first, then title match as fallback
 		if raw, ok := rawByID[r.ID]; ok {
 			item.RawNewsItem = raw
 		} else if raw, ok := rawByTitle[r.DisplayTitle]; ok {
 			item.RawNewsItem = raw
 		} else if raw, ok := rawByTitle[r.ID]; ok {
-			// LLM may put the title into the id field
 			item.RawNewsItem = raw
 		}
 		if item.DisplayTitle == "" {
@@ -356,17 +295,4 @@ func parseTagResultFromMessage(msg *schema.Message, rawByID map[string]RawNewsIt
 		tagged = append(tagged, item)
 	}
 	return tagged, nil
-}
-
-// splitBatches splits items into batches of at most batchSize.
-func splitBatches(items []RawNewsItem, batchSize int) [][]RawNewsItem {
-	var batches [][]RawNewsItem
-	for i := 0; i < len(items); i += batchSize {
-		end := i + batchSize
-		if end > len(items) {
-			end = len(items)
-		}
-		batches = append(batches, items[i:end])
-	}
-	return batches
 }

@@ -10,21 +10,22 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
 // embedCandidate holds an embedding-matched pair pending LLM verification.
 type embedCandidate struct {
 	itemIdx int
-	record  *PushHistoryRecord
+	record  *types.PushHistoryRecord
 	sim     float64
 }
 
 // mergeHistory merges tagged news items with push history for deduplication.
 // Strategy: link exact match > display_title exact match > embedding screening > LLM verification.
-func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem) ([]MergedNewsItem, error) {
-	merged := make([]MergedNewsItem, len(items))
+func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNewsItem) ([]types.MergedNewsItem, error) {
+	merged := make([]types.MergedNewsItem, len(items))
 	for i, item := range items {
-		merged[i] = MergedNewsItem{TaggedNewsItem: item}
+		merged[i] = types.MergedNewsItem{TaggedNewsItem: item}
 	}
 
 	history, err := p.loadPushHistory()
@@ -39,7 +40,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 	}
 
 	var historyEmbeds [][]float64
-	historyWithEmbed := make([]*PushHistoryRecord, 0)
+	historyWithEmbed := make([]*types.PushHistoryRecord, 0)
 	if p.Embedding != nil {
 		for i := range history {
 			if len(history[i].Embedding) > 0 {
@@ -80,7 +81,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 		}
 	}
 
-	historyByLink := make(map[string]*PushHistoryRecord)
+	historyByLink := make(map[string]*types.PushHistoryRecord)
 	for i := range history {
 		link := strings.TrimSpace(history[i].Link)
 		if link != "" {
@@ -88,7 +89,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 		}
 	}
 
-	historyByTitle := make(map[string]*PushHistoryRecord)
+	historyByTitle := make(map[string]*types.PushHistoryRecord)
 	for i := range history {
 		t := strings.TrimSpace(history[i].DisplayTitle)
 		if t != "" {
@@ -117,7 +118,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 
 		if len(itemEmbeds) > 0 && i < len(itemEmbeds) && len(itemEmbeds[i]) > 0 && len(historyEmbeds) > 0 {
 			bestSim := 0.0
-			var bestRecord *PushHistoryRecord
+			var bestRecord *types.PushHistoryRecord
 			for j, hEmb := range historyEmbeds {
 				if j >= len(historyWithEmbed) {
 					break
@@ -153,7 +154,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []TaggedNewsItem)
 					merged[c.itemIdx].SeenBefore = true
 					merged[c.itemIdx].HistoryNote = fmt.Sprintf("LLM确认重复(语义%.2f)，上次推送：%s", c.sim, c.record.PushTime)
 				} else if vr.IsReference {
-					ref := NewsReference{
+					ref := types.NewsReference{
 						DisplayTitle: c.record.DisplayTitle,
 						Source:       c.record.Source,
 						Link:         c.record.Link,
@@ -189,7 +190,7 @@ type verifyResult struct {
 }
 
 // llmVerifyDuplicatesMerged uses LLM to verify if embedding-matched candidates are truly duplicates.
-func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []MergedNewsItem, candidates []embedCandidate) ([]verifyResult, error) {
+func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []types.MergedNewsItem, candidates []embedCandidate) ([]verifyResult, error) {
 	var sb strings.Builder
 	sb.WriteString("请判断以下新闻对的关系。对于每一对，回复以下三种之一：\n")
 	sb.WriteString("- 重复：两条新闻描述的是同一个事件，内容没有实质进展\n")
@@ -265,9 +266,9 @@ func truncateForLLM(s string, maxRunes int) string {
 }
 
 // loadPushHistory reads push history from today's and yesterday's per-day files.
-func (p *NewsPipeline) loadPushHistory() ([]PushHistoryRecord, error) {
+func (p *NewsPipeline) loadPushHistory() ([]types.PushHistoryRecord, error) {
 	now := time.Now()
-	var records []PushHistoryRecord
+	var records []types.PushHistoryRecord
 
 	for _, t := range []time.Time{now, now.Add(-24 * time.Hour)} {
 		path := p.DataDir + "/push_history_" + t.Format("20060102") + ".jsonl"
@@ -283,7 +284,7 @@ func (p *NewsPipeline) loadPushHistory() ([]PushHistoryRecord, error) {
 			if line == "" {
 				continue
 			}
-			var r PushHistoryRecord
+			var r types.PushHistoryRecord
 			if err := json.Unmarshal([]byte(line), &r); err != nil {
 				continue
 			}
