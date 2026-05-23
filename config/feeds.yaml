@@ -57,7 +57,7 @@
   url: http://rss.cnn.com/rss/edition.rss
   lang: en
   use_proxy: true
-  enabled: true
+  enabled: false
 
 - name: Washington Post
   url: https://feeds.washingtonpost.com/rss/world
@@ -111,7 +111,7 @@
   url: https://www.france24.com/en/rss
   lang: en
   use_proxy: true
-  enabled: false
+  enabled: true
 
 - name: DW
   url: https://rss.dw.com/rdf/rss-en-all
