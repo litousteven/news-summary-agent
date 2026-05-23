@@ -8,21 +8,18 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/schema"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	NodeFetchRSS            = "FetchRSS"
-	NodeParallelTag         = "ParallelTag"
-	NodeMergeHistory        = "MergeHistory"
-	NodeBuildDigest         = "BuildDigest"
-	NodeTranslateItems      = "TranslateItems"
-	NodeFormatSummaryPrompt = "FormatSummaryPrompt"
-	NodeSummaryTemplate     = "SummaryPromptTemplate"
-	NodeSummaryChatModel    = "SummaryChatModel"
-	NodeRecordHistory       = "RecordHistory"
-	NodeUpdateTaggingGuide  = "UpdateTaggingGuide"
+	NodeFetchRSS           = "FetchRSS"
+	NodeParallelTag        = "ParallelTag"
+	NodeMergeHistory       = "MergeHistory"
+	NodeBuildDigest        = "BuildDigest"
+	NodeTranslateItems     = "TranslateItems"
+	NodeSummarizePerItem   = "SummarizePerItem"
+	NodeRecordHistory      = "RecordHistory"
+	NodeUpdateTaggingGuide = "UpdateTaggingGuide"
 )
 
 // PipelineConfig holds configurable limits loaded from config.yaml.
@@ -223,36 +220,21 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		return nil, err
 	}
 
-	// 9. FormatSummaryPrompt — Lambda
-	if err := g.AddLambdaNode(NodeFormatSummaryPrompt,
-		compose.InvokableLambda(p.formatSummaryPrompt),
-		compose.WithNodeName("拼装摘要Prompt变量"),
+	// 5. SummarizePerItem — Lambda (per-item LLM summary)
+	// PostHandler: update DigestItems in shared state with per-item summaries
+	if err := g.AddLambdaNode(NodeSummarizePerItem,
+		compose.InvokableLambda(p.summarizePerItem),
+		compose.WithNodeName("逐条生成摘要"),
+		compose.WithStatePostHandler(func(ctx context.Context, out *DigestData, state *PipelineState) (*DigestData, error) {
+			state.DigestItems = out.Items
+			return out, nil
+		}),
 	); err != nil {
 		return nil, err
 	}
 
-	// 9. SummaryPromptTemplate — ChatTemplate
-	summaryTpl, err := p.newSummaryChatTemplate()
-	if err != nil {
-		return nil, err
-	}
-	if err := g.AddChatTemplateNode(NodeSummaryTemplate, summaryTpl,
-		compose.WithNodeName("摘要Prompt模板"),
-	); err != nil {
-		return nil, err
-	}
-
-	// 10. SummaryChatModel — same ChatModel instance for Summary stage (with fallback)
-	if err := g.AddLambdaNode(NodeSummaryChatModel,
-		compose.InvokableLambda(p.summaryChatModelWithFallback),
-		compose.WithNodeName("摘要LLM兜底"),
-	); err != nil {
-		return nil, err
-	}
-
-	// 11. RecordHistory — Lambda
-	// PreHandler: inject Slot into state from request (already done via FetchRSS)
-	// The lambda uses compose.ProcessState internally to access DigestItems
+	// 6. RecordHistory — Lambda
+	// Takes DigestData (with per-item summaries), constructs final message and persists
 	if err := g.AddLambdaNode(NodeRecordHistory,
 		compose.InvokableLambda(p.recordHistory),
 		compose.WithNodeName("记录推送历史"),
@@ -260,7 +242,7 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		return nil, err
 	}
 
-	// 12. UpdateTaggingGuide — Lambda (analyzes tagged news, suggests category updates)
+	// 7. UpdateTaggingGuide — Lambda (analyzes tagged news, suggests category updates)
 	if err := g.AddLambdaNode(NodeUpdateTaggingGuide,
 		compose.InvokableLambda(p.updateTaggingGuide),
 		compose.WithNodeName("更新分类体系"),
@@ -275,10 +257,8 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		{NodeParallelTag, NodeMergeHistory},
 		{NodeMergeHistory, NodeBuildDigest},
 		{NodeBuildDigest, NodeTranslateItems},
-		{NodeTranslateItems, NodeFormatSummaryPrompt},
-		{NodeFormatSummaryPrompt, NodeSummaryTemplate},
-		{NodeSummaryTemplate, NodeSummaryChatModel},
-		{NodeSummaryChatModel, NodeRecordHistory},
+		{NodeTranslateItems, NodeSummarizePerItem},
+		{NodeSummarizePerItem, NodeRecordHistory},
 		{NodeRecordHistory, NodeUpdateTaggingGuide},
 		{NodeUpdateTaggingGuide, compose.END},
 	}
@@ -294,20 +274,6 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*NewsSu
 		return nil, err
 	}
 	return r, nil
-}
-
-// Run is a convenience method to build and execute the pipeline.
-func (p *NewsPipeline) summaryChatModelWithFallback(ctx context.Context, prompts []*schema.Message) (*schema.Message, error) {
-	if len(prompts) == 0 {
-		return nil, nil
-	}
-	prompt := prompts[0]
-	resp, err := p.ChatModel.Generate(ctx, []*schema.Message{prompt})
-	if err != nil {
-		log.Printf("[SummaryChatModel] LLM调用失败: %v，使用原始digest_content兜底", err)
-		return &schema.Message{Content: prompt.Content}, nil
-	}
-	return resp, nil
 }
 
 func (p *NewsPipeline) Run(ctx context.Context, req *NewsSummaryRequest) (*NewsSummaryResult, error) {

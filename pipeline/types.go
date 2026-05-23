@@ -67,7 +67,8 @@ type DigestData struct {
 // DigestItem is a single item in the digest.
 type DigestItem struct {
 	MergedNewsItem
-	FactParagraph string
+	FactParagraph string `json:"fact_paragraph"`
+	ItemSummary   string `json:"item_summary"`
 }
 
 // DigestStats contains pipeline statistics.

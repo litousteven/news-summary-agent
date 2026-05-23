@@ -6,48 +6,34 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/compose"
-	"github.com/cloudwego/eino/schema"
 )
 
-// recordHistory appends pushed items to push_history.jsonl and returns the final result.
-// It uses PipelineState to access DigestItems for per-item record writing with embeddings,
-// which enables semantic dedup on subsequent runs.
-func (p *NewsPipeline) recordHistory(ctx context.Context, msg *schema.Message) (*NewsSummaryResult, error) {
-	summaryText := msg.Content
+func (p *NewsPipeline) recordHistory(ctx context.Context, data *DigestData) (*NewsSummaryResult, error) {
+	message := buildFinalMessage(data)
 
 	result := &NewsSummaryResult{
-		Message: summaryText,
-		Stats: DigestStats{
-			ByCategory: make(map[string]int),
-		},
+		Message: message,
+		Stats:   data.Stats,
 	}
 
-	// Retrieve DigestItems, Slot, and Stats from shared state
-	var digestItems []DigestItem
 	var slot string
 	_ = compose.ProcessState[*PipelineState](ctx, func(_ context.Context, state *PipelineState) error {
-		digestItems = state.DigestItems
 		slot = state.Slot
-		// Copy stats from digest if available
-		if state.DigestStats != nil {
-			result.Stats = *state.DigestStats
-		}
-		result.DigestItems = digestItems
 		return nil
 	})
 
-	// Write per-item records with embeddings for dedup on next run
-	if len(digestItems) > 0 {
-		if err := p.RecordHistoryFromDigest(ctx, digestItems, slot); err != nil {
+	result.DigestItems = data.Items
+
+	if len(data.Items) > 0 {
+		if err := p.RecordHistoryFromDigest(ctx, data.Items, slot); err != nil {
 			log.Printf("[RecordHistory] 写入逐条历史记录失败: %v", err)
-			// Non-fatal: still return the result
 		}
 	} else {
-		// Fallback: write a single session-level record if no digest items available
 		slotLabel := slotToLabel(slot)
 		now := time.Now().Format(time.RFC3339)
 		record := PushHistoryRecord{
@@ -57,7 +43,7 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, msg *schema.Message) (
 			Category:     "简报",
 			Source:       "多源",
 			PublishedAt:  now,
-			FactSummary:  truncateForHistory(summaryText),
+			FactSummary:  truncateForHistory("暂无内容"),
 		}
 		if err := p.appendHistoryRecord(record); err != nil {
 			return nil, fmt.Errorf("append history: %w", err)
@@ -65,6 +51,65 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, msg *schema.Message) (
 	}
 
 	return result, nil
+}
+
+func buildFinalMessage(data *DigestData) string {
+	if len(data.Items) == 0 {
+		return ""
+	}
+
+	byCategory := make(map[string][]DigestItem)
+	var catOrder []string
+	seen := make(map[string]bool)
+	for _, item := range data.Items {
+		cat := item.Category
+		if cat == "" {
+			cat = "其他重要动态"
+		}
+		if !seen[cat] {
+			catOrder = append(catOrder, cat)
+			seen[cat] = true
+		}
+		byCategory[cat] = append(byCategory[cat], item)
+	}
+
+	sort.SliceStable(catOrder, func(i, j int) bool {
+		ci, cj := catOrder[i], catOrder[j]
+		for _, c := range CategoryOrder {
+			if c == ci {
+				return true
+			}
+			if c == cj {
+				return false
+			}
+		}
+		return false
+	})
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("当前时间：%s\n档位：%s\n\n", data.CurrentTime, data.SlotLabel))
+
+	for _, cat := range catOrder {
+		items := byCategory[cat]
+		sb.WriteString(fmt.Sprintf("## %s\n\n", cat))
+		for _, item := range items {
+			summary := item.ItemSummary
+			if summary == "" {
+				summary = item.FactParagraph
+			}
+			sb.WriteString(fmt.Sprintf("- %s（%s）\n", summary, item.Source))
+			for _, ref := range item.Refs {
+				label := ref.DisplayTitle
+				if ref.FactSummary != "" {
+					label = ref.FactSummary
+				}
+				sb.WriteString(fmt.Sprintf("  [%s] %s（%s）\n", ref.RelationNote, label, ref.Source))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }
 
 // historyFilePath returns the per-day history file path for the given date.
@@ -89,7 +134,11 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []Dige
 	if p.Embedding != nil && len(items) > 0 {
 		texts := make([]string, len(items))
 		for i, item := range items {
-			texts[i] = item.DisplayTitle + " " + item.FactParagraph
+			summary := item.ItemSummary
+			if summary == "" {
+				summary = item.FactParagraph
+			}
+			texts[i] = item.DisplayTitle + " " + summary
 		}
 		vecs, err := CachedEmbedStrings(ctx, p, texts)
 		if err == nil && len(vecs) == len(items) {

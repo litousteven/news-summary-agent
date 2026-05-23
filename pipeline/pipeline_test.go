@@ -325,15 +325,14 @@ func TestRecordHistory_WritesPerItemRecords(t *testing.T) {
 	})
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
-	msg := &schema.Message{Content: "这是最终的简报文本"}
 
-	result, err := p.recordHistory(ctx, msg)
+	result, err := p.recordHistory(ctx, &DigestData{Items: digestItems})
 	if err != nil {
 		t.Fatalf("recordHistory returned error: %v", err)
 	}
 
-	if result.Message != "这是最终的简报文本" {
-		t.Errorf("result Message: got %q, want %q", result.Message, "这是最终的简报文本")
+	if !contains(result.Message, "美军在海湾扣押了一艘伊朗船只") {
+		t.Errorf("result Message should contain item summary, got: %s", result.Message)
 	}
 
 	// Read back the history file and verify per-item records
@@ -420,9 +419,8 @@ func TestRecordHistory_WritesPerItemRecordsWithEmbeddings(t *testing.T) {
 	}
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir, Embedding: mockEmbed}
-	msg := &schema.Message{Content: "简报文本"}
 
-	_, err := p.recordHistory(ctx, msg)
+	_, err := p.recordHistory(ctx, &DigestData{Items: digestItems})
 	if err != nil {
 		t.Fatalf("recordHistory returned error: %v", err)
 	}
@@ -451,15 +449,14 @@ func TestRecordHistory_FallbackToSessionRecord(t *testing.T) {
 	})
 
 	p := &NewsPipeline{ConfigDir: tmpDir, DataDir: tmpDir}
-	msg := &schema.Message{Content: "这是简报文本"}
 
-	result, err := p.recordHistory(ctx, msg)
+	result, err := p.recordHistory(ctx, &DigestData{Items: nil})
 	if err != nil {
 		t.Fatalf("recordHistory returned error: %v", err)
 	}
 
-	if result.Message != "这是简报文本" {
-		t.Errorf("result Message: got %q, want %q", result.Message, "这是简报文本")
+	if result.Message != "" {
+		t.Errorf("result Message should be empty for nil items, got: %s", result.Message)
 	}
 
 	records := loadHistoryRecords(t, tmpDir)
@@ -993,50 +990,38 @@ func TestBuildDigest_IncludesReferencesInDigestItems(t *testing.T) {
 	}
 }
 
-func TestFormatSummaryPrompt_IncludesReferenceContext(t *testing.T) {
-	digest := &DigestData{
-		Items: []DigestItem{
-			{
-				MergedNewsItem: MergedNewsItem{
-					TaggedNewsItem: TaggedNewsItem{
-						RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC"},
-						DisplayTitle: "伊朗发动导弹袭击",
-						Category:     "战争与地缘",
-					},
-					Refs: []NewsReference{
-						{
-							DisplayTitle: "美伊冲突升级",
-							FactSummary:  "美伊冲突的前情概要",
-							RelationNote: "前情回顾",
-						},
-					},
+func TestBuildItemSummaryPrompt_IncludesReferenceContext(t *testing.T) {
+	item := &DigestItem{
+		MergedNewsItem: MergedNewsItem{
+			TaggedNewsItem: TaggedNewsItem{
+				RawNewsItem:  RawNewsItem{ID: "1", Source: "BBC"},
+				DisplayTitle: "伊朗发动导弹袭击",
+				Category:     "战争与地缘",
+			},
+			Refs: []NewsReference{
+				{
+					DisplayTitle: "美伊冲突升级",
+					FactSummary:  "美伊冲突的前情概要",
+					RelationNote: "前情回顾",
 				},
-				FactParagraph: "伊朗向美军基地发射了多枚导弹。",
 			},
 		},
-		SlotLabel:   "午间版",
-		CurrentTime: "2026-04-29 12:00:00",
+		FactParagraph: "伊朗向美军基地发射了多枚导弹。",
 	}
 
-	p := &NewsPipeline{}
-	vars, err := p.formatSummaryPrompt(context.Background(), digest)
-	if err != nil {
-		t.Fatalf("formatSummaryPrompt error: %v", err)
-	}
+	prompt := buildItemSummaryPrompt(item)
 
-	content, ok := vars["digest_content"].(string)
-	if !ok {
-		t.Fatal("digest_content is not a string")
+	if !contains(prompt, "伊朗向美军基地发射了多枚导弹") {
+		t.Errorf("prompt missing fact paragraph, got: %s", prompt)
 	}
-
-	if !contains(content, "伊朗向美军基地发射了多枚导弹") {
-		t.Errorf("digest_content missing fact paragraph, got: %s", content)
+	if !contains(prompt, "前情回顾") {
+		t.Errorf("prompt missing reference RelationNote, got: %s", prompt)
 	}
-	if !contains(content, "前情回顾") {
-		t.Errorf("digest_content missing reference RelationNote, got: %s", content)
+	if !contains(prompt, "美伊冲突的前情概要") {
+		t.Errorf("prompt missing reference FactSummary, got: %s", prompt)
 	}
-	if !contains(content, "美伊冲突的前情概要") {
-		t.Errorf("digest_content missing reference FactSummary, got: %s", content)
+	if !contains(prompt, "\"summary\"") {
+		t.Errorf("prompt missing JSON output format instruction, got: %s", prompt)
 	}
 }
 
