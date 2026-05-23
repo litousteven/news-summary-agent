@@ -45,6 +45,14 @@ func (p *NewsPipeline) fetchRSS(ctx context.Context, req *NewsSummaryRequest) ([
 				break
 			}
 			summary := cleanHTML(item.Description)
+			if summary == "" {
+				summary = cleanHTML(item.Content)
+			}
+			if summary == "" {
+				log.Printf("[FetchRSS] source=%s title=%q 摘要为空（description和content均缺失）", feed.Name, item.Title)
+			} else if item.Description == "" && item.Content != "" {
+				log.Printf("[FetchRSS] source=%s title=%q 摘要来自content:encoded（description为空）", feed.Name, item.Title)
+			}
 			id := generateItemID(feed.Name, item.Title, item.Link)
 			items = append(items, RawNewsItem{
 				ID:          id,
