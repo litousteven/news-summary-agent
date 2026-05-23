@@ -1,4 +1,4 @@
-package pipeline
+package summary
 
 import (
 	"context"
@@ -7,19 +7,22 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
+	"github.com/litousteven/news-summary-agent/pipeline/config"
 	types "github.com/litousteven/news-summary-agent/pipeline/types"
+	"github.com/litousteven/news-summary-agent/pipeline/util"
 )
 
 type itemSummaryResult struct {
 	Summary string `json:"summary"`
 }
 
-func (p *NewsPipeline) summarizePerItem(ctx context.Context, data *types.DigestData) (*types.DigestData, error) {
+func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *types.DigestData, cfg config.TagBatchConfig) (*types.DigestData, error) {
 	log.Printf("[SummarizePerItem] Start, total items: %d", len(data.Items))
-	if p.ChatModel == nil {
+	if chatModel == nil {
 		log.Printf("[SummarizePerItem] ChatModel is nil, skipping")
 		return data, nil
 	}
@@ -28,7 +31,7 @@ func (p *NewsPipeline) summarizePerItem(ctx context.Context, data *types.DigestD
 		return data, nil
 	}
 
-	sem := make(chan struct{}, 3)
+	sem := make(chan struct{}, cfg.MaxConcurrentBatches)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	success := 0
@@ -50,9 +53,33 @@ func (p *NewsPipeline) summarizePerItem(ctx context.Context, data *types.DigestD
 				schema.UserMessage(promptText),
 			}
 
-			resp, err := p.ChatModel.Generate(ctx, messages)
-			if err != nil {
-				log.Printf("[SummarizePerItem] Item [%d] ChatModel.Generate error: %v", idx, err)
+			var resp *schema.Message
+			var callErr error
+		retryLoop:
+			for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+				if attempt > 0 {
+					backoff := time.Duration(1<<(attempt-1)) * cfg.RetryBaseDelay
+					log.Printf("[SummarizePerItem] Item [%d] 第 %d 次重试（等待 %v）...", idx, attempt, backoff)
+					select {
+					case <-ctx.Done():
+						callErr = ctx.Err()
+						break retryLoop
+					case <-time.After(backoff):
+					}
+				}
+
+				callCtx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout)
+				resp, callErr = chatModel.Generate(callCtx, messages)
+				cancel()
+
+				if callErr == nil {
+					break
+				}
+				log.Printf("[SummarizePerItem] Item [%d] 第 %d 次尝试失败: %v", idx, attempt+1, callErr)
+			}
+
+			if callErr != nil {
+				log.Printf("[SummarizePerItem] Item [%d] 重试耗尽（共 %d 次）: %v", idx, cfg.MaxRetries+1, callErr)
 				mu.Lock()
 				failed++
 				mu.Unlock()
@@ -99,7 +126,7 @@ func buildItemSummaryPrompt(item *types.DigestItem) string {
 		sb.WriteString(fmt.Sprintf("事实段落: %s\n", item.FactParagraph))
 	}
 	if item.Summary != "" && item.Summary != item.FactParagraph {
-		sb.WriteString(fmt.Sprintf("原始摘要: %s\n", truncateForLLM(item.Summary, 200)))
+		sb.WriteString(fmt.Sprintf("原始摘要: %s\n", util.TruncateSummaryForLLM(item.Summary, 200)))
 	}
 
 	if len(item.Refs) > 0 {
@@ -121,14 +148,14 @@ func buildItemSummaryPrompt(item *types.DigestItem) string {
 func parseItemSummaryResponse(content string) *itemSummaryResult {
 	var result itemSummaryResult
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		extracted := tagpkg.ExtractJSONFromMarkdown(content)
+		extracted := util.ExtractJSONFromMarkdown(content)
 		if extracted != "" {
 			if err2 := json.Unmarshal([]byte(extracted), &result); err2 != nil {
 				return nil
 			}
 			return &result
 		}
-		extracted = extractJSONObject(content)
+		extracted = util.ExtractJSONObject(content)
 		if extracted != "" {
 			if err2 := json.Unmarshal([]byte(extracted), &result); err2 != nil {
 				return nil

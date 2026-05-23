@@ -2,14 +2,21 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	"gopkg.in/yaml.v3"
 
+	"github.com/litousteven/news-summary-agent/pipeline/config"
+	"github.com/litousteven/news-summary-agent/pipeline/embedding"
+	"github.com/litousteven/news-summary-agent/pipeline/summary"
+	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
+	"github.com/litousteven/news-summary-agent/pipeline/translate"
 	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
@@ -64,14 +71,14 @@ func LoadConfig(configDir string) PipelineConfig {
 
 // NewsPipeline holds dependencies and builds the Eino Graph.
 type NewsPipeline struct {
-	ChatModel    model.BaseChatModel // shared by Summary, MergeHistory, TranslateItems stages
-	TagChatModel model.BaseChatModel // tagging stage only (JSON forced mode), falls back to ChatModel
-	Embedding    EmbeddingClient     // OpenAI-compatible embedding for semantic dedup
-	EmbedCache   *EmbeddingCache     // per-day persistent cache for embedding vectors
-	ConfigDir    string              // path to config/ directory (config.yaml, feeds.yaml, tagging_guide.md, etc.)
-	DataDir      string              // path to data/ directory (runtime output: push_history, tagged_cache, digest)
-	ProxyAddr    string              // HTTP proxy for RSS feeds
-	Config       PipelineConfig      // configurable limits (loaded from config.yaml)
+	ChatModel    model.BaseChatModel              // shared by Summary, MergeHistory, TranslateItems stages
+	TagChatModel model.BaseChatModel              // tagging stage only (JSON forced mode), falls back to ChatModel
+	Embedding    *embedding.OpenAIEmbeddingClient // OpenAI-compatible embedding for semantic dedup
+	EmbedCache   *embedding.EmbeddingCache        // per-day persistent cache for embedding vectors
+	ConfigDir    string                           // path to config/ directory (config.yaml, feeds.yaml, tagging_guide.md, etc.)
+	DataDir      string                           // path to data/ directory (runtime output: push_history, tagged_cache, digest)
+	ProxyAddr    string                           // HTTP proxy for RSS feeds
+	Config       PipelineConfig                   // configurable limits (loaded from config.yaml)
 }
 
 // Getters with defaults
@@ -152,12 +159,6 @@ func (p *NewsPipeline) GetTagBatchTimeoutSeconds() int {
 	return p.Config.TagBatchTimeoutSeconds
 }
 
-// EmbeddingClient is the interface for OpenAI-compatible embedding APIs.
-type EmbeddingClient interface {
-	// EmbedStrings returns embedding vectors for the given texts.
-	EmbedStrings(ctx context.Context, texts []string) ([][]float64, error)
-}
-
 // BuildGraph constructs the 11-node Eino Graph as documented in README.
 func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*types.NewsSummaryRequest, *types.NewsSummaryResult], error) {
 	g := compose.NewGraph[*types.NewsSummaryRequest, *types.NewsSummaryResult](
@@ -179,9 +180,57 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*types.
 		return nil, err
 	}
 
-	// 2. ParallelTag — Lambda (replaces FormatTagPrompt + TagTemplate + ChatModel + ParseTagResult)
+	// 2. ParallelTag — Lambda (calls tagpkg.ParallelTagItems directly)
 	if err := g.AddLambdaNode(NodeParallelTag,
-		compose.InvokableLambda(p.parallelTagItems),
+		compose.InvokableLambda(func(ctx context.Context, items []types.RawNewsItem) ([]types.TaggedNewsItem, error) {
+			if len(items) == 0 {
+				return nil, nil
+			}
+
+			tagGraph, err := p.buildTagSubGraph(ctx)
+			if err != nil {
+				log.Printf("[ParallelTag] 构建TagSubGraph失败: error=%v", err)
+				return nil, fmt.Errorf("build tag sub-graph: %w", err)
+			}
+
+			categories, _ := p.loadCategories()
+			categoriesText := formatCategoriesForPrompt(categories)
+			guide, err := p.loadTaggingGuide()
+			if err != nil {
+				log.Printf("[ParallelTag] 加载tagging_guide失败: error=%v", err)
+				return nil, fmt.Errorf("load tagging guide: %w", err)
+			}
+			examples, err := p.loadTaggingExamples()
+			if err != nil {
+				log.Printf("[ParallelTag] 加载tagging_examples失败: error=%v", err)
+				return nil, fmt.Errorf("load tagging examples: %w", err)
+			}
+
+			cfg := config.TagBatchConfig{
+				BatchSize:            p.GetTagBatchSize(),
+				MaxConcurrentBatches: p.GetTagMaxConcurrentBatches(),
+				MaxRetries:           p.GetTagMaxRetries(),
+				RetryBaseDelay:       time.Duration(p.GetTagRetryBaseDelaySeconds()) * time.Second,
+				BatchTimeout:         time.Duration(p.GetTagBatchTimeoutSeconds()) * time.Second,
+			}
+
+			tagged, _, _, err := tagpkg.ParallelTagItems(
+				ctx, p.DataDir, items, tagGraph, categoriesText, guide, examples, cfg,
+			)
+			if err != nil {
+				return nil, err
+			}
+
+			fetchedCount := len(items)
+			taggedCount := len(tagged)
+			_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
+				state.OriginalFetchedCount = fetchedCount
+				state.ActualTaggedCount = taggedCount
+				return nil
+			})
+
+			return tagged, nil
+		}),
 		compose.WithNodeName("分批并行标注"),
 	); err != nil {
 		return nil, err
@@ -212,7 +261,16 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*types.
 	// 8. TranslateItems — Lambda
 	// PostHandler: update DigestItems in shared state with translated data
 	if err := g.AddLambdaNode(NodeTranslateItems,
-		compose.InvokableLambda(p.TranslateItems),
+		compose.InvokableLambda(func(ctx context.Context, data *types.DigestData) (*types.DigestData, error) {
+			cfg := config.TagBatchConfig{
+				BatchSize:            0,
+				MaxConcurrentBatches: p.GetTagMaxConcurrentBatches(),
+				MaxRetries:           p.GetTagMaxRetries(),
+				RetryBaseDelay:       time.Duration(p.GetTagRetryBaseDelaySeconds()) * time.Second,
+				BatchTimeout:         time.Duration(p.GetTagBatchTimeoutSeconds()) * time.Second,
+			}
+			return translate.TranslateItems(ctx, p.ChatModel, data, cfg)
+		}),
 		compose.WithNodeName("翻译外语新闻"),
 		compose.WithStatePostHandler(func(ctx context.Context, out *types.DigestData, state *types.PipelineState) (*types.DigestData, error) {
 			state.DigestItems = out.Items
@@ -225,7 +283,16 @@ func (p *NewsPipeline) BuildGraph(ctx context.Context) (compose.Runnable[*types.
 	// 5. SummarizePerItem — Lambda (per-item LLM summary)
 	// PostHandler: update DigestItems in shared state with per-item summaries
 	if err := g.AddLambdaNode(NodeSummarizePerItem,
-		compose.InvokableLambda(p.summarizePerItem),
+		compose.InvokableLambda(func(ctx context.Context, data *types.DigestData) (*types.DigestData, error) {
+			cfg := config.TagBatchConfig{
+				BatchSize:            0,
+				MaxConcurrentBatches: p.GetTagMaxConcurrentBatches(),
+				MaxRetries:           p.GetTagMaxRetries(),
+				RetryBaseDelay:       time.Duration(p.GetTagRetryBaseDelaySeconds()) * time.Second,
+				BatchTimeout:         time.Duration(p.GetTagBatchTimeoutSeconds()) * time.Second,
+			}
+			return summary.SummarizePerItem(ctx, p.ChatModel, data, cfg)
+		}),
 		compose.WithNodeName("逐条生成摘要"),
 		compose.WithStatePostHandler(func(ctx context.Context, out *types.DigestData, state *types.PipelineState) (*types.DigestData, error) {
 			state.DigestItems = out.Items

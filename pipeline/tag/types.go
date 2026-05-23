@@ -1,6 +1,10 @@
 package tag
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	types "github.com/litousteven/news-summary-agent/pipeline/types"
+)
 
 type TagResultItem struct {
 	ID            string          `json:"id"`
@@ -36,4 +40,17 @@ type SplitChange struct {
 type MergeChange struct {
 	From []string    `json:"from"`
 	Into CategoryDef `json:"into"`
+}
+
+func ConvertCategoryDefs(defs []types.CategoryDef) []CategoryDef {
+	result := make([]CategoryDef, len(defs))
+	for i, c := range defs {
+		result[i] = CategoryDef{
+			Name:        c.Name,
+			Keywords:    c.Keywords,
+			Boundary:    c.Boundary,
+			NotBoundary: c.NotBoundary,
+		}
+	}
+	return result
 }

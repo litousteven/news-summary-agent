@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/litousteven/news-summary-agent/pipeline/embedding"
 	types "github.com/litousteven/news-summary-agent/pipeline/types"
+	"github.com/litousteven/news-summary-agent/pipeline/util"
 )
 
 // embedCandidate holds an embedding-matched pair pending LLM verification.
@@ -58,7 +60,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 			}
 		}
 		if len(missing) > 0 {
-			vecs, err := CachedEmbedStrings(ctx, p, missing)
+			vecs, err := p.Embedding.EmbedStrings(ctx, missing)
 			if err == nil && len(vecs) == len(missing) {
 				for j, idx := range missingIdx {
 					history[idx].Embedding = vecs[j]
@@ -75,7 +77,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 		for i, item := range merged {
 			texts[i] = item.DisplayTitle + " " + item.Summary
 		}
-		vecs, err := CachedEmbedStrings(ctx, p, texts)
+		vecs, err := p.Embedding.EmbedStrings(ctx, texts)
 		if err == nil && len(vecs) == len(merged) {
 			itemEmbeds = vecs
 		}
@@ -123,7 +125,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 				if j >= len(historyWithEmbed) {
 					break
 				}
-				sim := cosineSimilarity(itemEmbeds[i], hEmb)
+				sim := embedding.CosineSimilarity(itemEmbeds[i], hEmb)
 				if sim >= p.GetClusterThreshold() && sim > bestSim {
 					bestSim = sim
 					bestRecord = historyWithEmbed[j]
@@ -201,8 +203,8 @@ func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []ty
 	for idx, c := range candidates {
 		item := items[c.itemIdx]
 		sb.WriteString(fmt.Sprintf("### 新闻对 %d\n", idx+1))
-		sb.WriteString(fmt.Sprintf("**当前新闻**：标题：%s | 摘要：%s\n", item.DisplayTitle, truncateForLLM(item.Summary, 200)))
-		sb.WriteString(fmt.Sprintf("**历史新闻**：标题：%s | 摘要：%s\n", c.record.DisplayTitle, truncateForLLM(c.record.FactSummary, 200)))
+		sb.WriteString(fmt.Sprintf("**当前新闻**：标题：%s | 摘要：%s\n", item.DisplayTitle, util.TruncateSummaryForLLM(item.Summary, 200)))
+		sb.WriteString(fmt.Sprintf("**历史新闻**：标题：%s | 摘要：%s\n", c.record.DisplayTitle, util.TruncateSummaryForLLM(c.record.FactSummary, 200)))
 		sb.WriteString(fmt.Sprintf("（向量相似度：%.2f）\n\n", c.sim))
 	}
 
@@ -255,14 +257,6 @@ func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []ty
 	}
 
 	return results, nil
-}
-
-func truncateForLLM(s string, maxRunes int) string {
-	runes := []rune(s)
-	if len(runes) <= maxRunes {
-		return s
-	}
-	return string(runes[:maxRunes]) + "..."
 }
 
 // loadPushHistory reads push history from today's and yesterday's per-day files.

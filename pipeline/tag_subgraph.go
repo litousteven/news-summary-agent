@@ -6,17 +6,13 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+
+	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
 	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
-type tagSubGraphInput = map[string]any
-
 func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[map[string]any, []types.TaggedNewsItem], error) {
-	g := compose.NewGraph[map[string]any, []types.TaggedNewsItem](
-		compose.WithGenLocalState(func(ctx context.Context) *tagSubGraphState {
-			return &tagSubGraphState{}
-		}),
-	)
+	g := compose.NewGraph[map[string]any, []types.TaggedNewsItem]()
 
 	tagTpl, err := p.newTagChatTemplate()
 	if err != nil {
@@ -39,7 +35,14 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 	}
 
 	if err := g.AddLambdaNode("ParseTagResult",
-		compose.InvokableLambda(p.parseTagResultFromMessage),
+		compose.InvokableLambda(func(ctx context.Context, msg *schema.Message) ([]types.TaggedNewsItem, error) {
+			var rawItems []types.RawNewsItem
+			_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
+				rawItems = state.RawItems
+				return nil
+			})
+			return tagpkg.ParseTagResultFromMessage(msg.Content, rawItems)
+		}),
 		compose.WithNodeName("解析标注结果"),
 	); err != nil {
 		return nil, err
@@ -62,18 +65,4 @@ func (p *NewsPipeline) buildTagSubGraph(ctx context.Context) (compose.Runnable[m
 		return nil, fmt.Errorf("compile tag sub-graph: %w", err)
 	}
 	return r, nil
-}
-
-type tagSubGraphState struct{}
-
-func (p *NewsPipeline) parseTagResultFromMessage(ctx context.Context, msg *schema.Message) ([]types.TaggedNewsItem, error) {
-	rawByID := make(map[string]types.RawNewsItem)
-	_ = compose.ProcessState[*types.PipelineState](ctx, func(_ context.Context, state *types.PipelineState) error {
-		for _, raw := range state.RawItems {
-			rawByID[raw.ID] = raw
-		}
-		return nil
-	})
-
-	return parseTagResultFromMessage(msg, rawByID)
 }

@@ -1,4 +1,4 @@
-package pipeline
+package embedding
 
 import (
 	"bytes"
@@ -8,6 +8,12 @@ import (
 	"io"
 	"net/http"
 )
+
+// EmbeddingClient is the interface for OpenAI-compatible embedding APIs.
+type EmbeddingClient interface {
+	// EmbedStrings returns embedding vectors for the given texts.
+	EmbedStrings(ctx context.Context, texts []string) ([][]float64, error)
+}
 
 // OpenAIEmbeddingClient implements EmbeddingClient using OpenAI-compatible API.
 type OpenAIEmbeddingClient struct {
@@ -100,7 +106,7 @@ func (c *OpenAIEmbeddingClient) EmbedStrings(ctx context.Context, texts []string
 }
 
 // cosineSimilarity computes cosine similarity between two vectors.
-func cosineSimilarity(a, b []float64) float64 {
+func CosineSimilarity(a, b []float64) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}
