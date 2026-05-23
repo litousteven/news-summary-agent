@@ -16,6 +16,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/litousteven/news-summary-agent/pipeline"
+	"github.com/litousteven/news-summary-agent/pipeline/embedding"
 	"github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
@@ -65,7 +66,7 @@ func main() {
 	cfg := pipeline.LoadConfig(absConfigDir)
 
 	// Initialize embedding cache
-	embedCache := pipeline.NewEmbeddingCache(absDataDir)
+	embedCache := embedding.NewEmbeddingCache(absDataDir)
 	embedCache.Load()
 
 	p := &pipeline.NewsPipeline{
@@ -145,7 +146,7 @@ func createChatModel(ctx context.Context, jsonMode bool) (model.BaseChatModel, e
 
 // createEmbeddingClient creates an OpenAI-compatible embedding client.
 // Returns nil if not configured (embedding-based dedup will be skipped).
-func createEmbeddingClient() pipeline.EmbeddingClient {
+func createEmbeddingClient() *embedding.OpenAIEmbeddingClient {
 	apiKey := os.Getenv("EMBEDDING_API_KEY")
 	baseURL := os.Getenv("EMBEDDING_BASE_URL")
 	modelName := os.Getenv("EMBEDDING_MODEL_NAME")
@@ -155,7 +156,7 @@ func createEmbeddingClient() pipeline.EmbeddingClient {
 		return nil
 	}
 
-	return pipeline.NewOpenAIEmbeddingClient(baseURL, apiKey, modelName)
+	return embedding.NewOpenAIEmbeddingClient(baseURL, apiKey, modelName)
 }
 
 // writeDigestMD writes the pushed news items to a timestamped .md file.

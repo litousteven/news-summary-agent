@@ -1,4 +1,4 @@
-package pipeline
+package embedding
 
 import (
 	"context"
@@ -91,14 +91,7 @@ func embedHash(text string) string {
 
 // CachedEmbedStrings wraps the Embedding model with per-day persistent caching.
 // For each text, it checks the cache first and only calls the model for cache misses.
-func CachedEmbedStrings(ctx context.Context, p *NewsPipeline, texts []string) ([][]float64, error) {
-	if p.Embedding == nil {
-		return nil, nil
-	}
-	// If cache not initialized, fall back to direct embedding
-	if p.EmbedCache == nil {
-		return p.Embedding.EmbedStrings(ctx, texts)
-	}
+func CachedEmbedStrings(ctx context.Context, ec *EmbeddingCache, embedding EmbeddingClient, texts []string) ([][]float64, error) {
 	hashes := make([]string, len(texts))
 	for i, t := range texts {
 		hashes[i] = embedHash(t)
@@ -109,7 +102,7 @@ func CachedEmbedStrings(ctx context.Context, p *NewsPipeline, texts []string) ([
 	var missTexts []string
 	var missIdx []int
 	for i, hash := range hashes {
-		if vec, ok := p.EmbedCache.Get(hash); ok {
+		if vec, ok := ec.Get(hash); ok {
 			results[i] = vec
 		} else {
 			missTexts = append(missTexts, texts[i])
@@ -119,7 +112,7 @@ func CachedEmbedStrings(ctx context.Context, p *NewsPipeline, texts []string) ([
 
 	// Embed only the misses
 	if len(missTexts) > 0 {
-		vecs, err := p.Embedding.EmbedStrings(ctx, missTexts)
+		vecs, err := embedding.EmbedStrings(ctx, missTexts)
 		if err != nil || len(vecs) != len(missTexts) {
 			if len(missIdx) == len(texts) {
 				return nil, err // all were misses, return error
@@ -129,7 +122,7 @@ func CachedEmbedStrings(ctx context.Context, p *NewsPipeline, texts []string) ([
 		}
 		for j, idx := range missIdx {
 			results[idx] = vecs[j]
-			p.EmbedCache.Set(hashes[idx], vecs[j])
+			ec.Set(hashes[idx], vecs[j])
 		}
 	}
 

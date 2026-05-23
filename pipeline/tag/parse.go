@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
+
+	"github.com/litousteven/news-summary-agent/pipeline/types"
+	"github.com/litousteven/news-summary-agent/pipeline/util"
 )
 
 func ParseTopicTags(raw json.RawMessage) []string {
@@ -123,15 +125,6 @@ func NormalizeCategory(cat string, validCategories map[string]bool, categoryDefs
 	}
 }
 
-func ExtractJSONFromMarkdown(content string) string {
-	re := regexp.MustCompile("(?s)```(?:json)?\\s*\\n(.*?)\\n```")
-	matches := re.FindStringSubmatch(content)
-	if len(matches) >= 2 {
-		return matches[1]
-	}
-	return ""
-}
-
 func ExtractJSONArray(content string) string {
 	start := strings.Index(content, "[")
 	end := strings.LastIndex(content, "]")
@@ -147,7 +140,7 @@ func ParseTagResultItems(msgContent string) ([]TagResultItem, error) {
 	var results []TagResultItem
 	err := json.Unmarshal([]byte(content), &results)
 	if err != nil {
-		extracted := ExtractJSONFromMarkdown(content)
+		extracted := util.ExtractJSONFromMarkdown(content)
 		if extracted != "" {
 			err = json.Unmarshal([]byte(extracted), &results)
 		}
@@ -185,4 +178,55 @@ func ParseTagResultItems(msgContent string) ([]TagResultItem, error) {
 	}
 
 	return results, nil
+}
+
+func ParseTaggedItems(msgContent string, rawItems []types.RawNewsItem, validCategories map[string]bool, categoryDefs []CategoryDef) ([]types.TaggedNewsItem, error) {
+	tagItems, err := ParseTagResultItems(msgContent)
+	if err != nil {
+		return nil, err
+	}
+
+	rawByID := make(map[string]types.RawNewsItem, len(rawItems))
+	rawByTitle := make(map[string]types.RawNewsItem, len(rawItems))
+	for _, raw := range rawItems {
+		rawByID[raw.ID] = raw
+		rawByTitle[raw.Title] = raw
+	}
+
+	tagged := make([]types.TaggedNewsItem, 0, len(tagItems))
+	for _, r := range tagItems {
+		item := types.TaggedNewsItem{
+			RawNewsItem: types.RawNewsItem{
+				ID: r.ID,
+			},
+			DisplayTitle:  r.DisplayTitle,
+			Category:      NormalizeCategory(r.Category, validCategories, categoryDefs),
+			TopicTags:     ParseTopicTags(r.TopicTags),
+			Region:        r.Region,
+			InterestScore: ParseInterestScore(r.InterestScore),
+			IsDuplicate:   ParseBool(r.IsDuplicate, false),
+			Selected:      ParseBool(r.Selected, false),
+			WhySelected:   r.WhySelected,
+		}
+
+		if raw, ok := rawByID[r.ID]; ok {
+			item.RawNewsItem = raw
+		} else if raw, ok := rawByTitle[r.DisplayTitle]; ok {
+			item.RawNewsItem = raw
+		} else if raw, ok := rawByTitle[r.ID]; ok {
+			item.RawNewsItem = raw
+		}
+
+		if item.DisplayTitle == "" {
+			item.DisplayTitle = item.Title
+		}
+
+		tagged = append(tagged, item)
+	}
+
+	return tagged, nil
+}
+
+func ParseTagResultFromMessage(msgContent string, rawItems []types.RawNewsItem) ([]types.TaggedNewsItem, error) {
+	return ParseTaggedItems(msgContent, rawItems, types.ValidCategories, ConvertCategoryDefs(types.CategoryDefs))
 }

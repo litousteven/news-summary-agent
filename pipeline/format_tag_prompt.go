@@ -1,65 +1,17 @@
 package pipeline
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
-	"strings"
 
 	tagpkg "github.com/litousteven/news-summary-agent/pipeline/tag"
 	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
 
-func (p *NewsPipeline) formatTagPrompt(ctx context.Context, items []types.RawNewsItem) (map[string]any, error) {
-	var sb strings.Builder
-	for i, item := range items {
-		sb.WriteString(fmt.Sprintf("### [%d] %s\n", i+1, item.Title))
-		sb.WriteString(fmt.Sprintf("- ID: %s\n", item.ID))
-		sb.WriteString(fmt.Sprintf("- 来源: %s (%s)\n", item.Source, item.Lang))
-		sb.WriteString(fmt.Sprintf("- 摘要: %s\n", item.Summary))
-		sb.WriteString(fmt.Sprintf("- 发布时间: %s\n", item.PublishedAt))
-		sb.WriteString(fmt.Sprintf("- 链接: %s\n\n", item.Link))
-	}
-
-	categories, _ := p.loadCategories()
-	categoriesText := formatCategoriesForPrompt(categories)
-
-	guide, err := p.loadTaggingGuide()
-	if err != nil {
-		return nil, fmt.Errorf("load tagging guide: %w", err)
-	}
-
-	examples, err := p.loadTaggingExamples()
-	if err != nil {
-		return nil, fmt.Errorf("load tagging examples: %w", err)
-	}
-
-	return map[string]any{
-		"news_items":       sb.String(),
-		"categories":       categoriesText,
-		"tagging_guide":    guide,
-		"tagging_examples": examples,
-		"total_count":      fmt.Sprintf("%d", len(items)),
-	}, nil
-}
-
 func formatCategoriesForPrompt(defs []types.CategoryDef) string {
-	return tagpkg.FormatCategoriesForPrompt(convertToTagCategoryDefs(defs))
-}
-
-func convertToTagCategoryDefs(defs []types.CategoryDef) []tagpkg.CategoryDef {
-	result := make([]tagpkg.CategoryDef, len(defs))
-	for i, c := range defs {
-		result[i] = tagpkg.CategoryDef{
-			Name:        c.Name,
-			Keywords:    c.Keywords,
-			Boundary:    c.Boundary,
-			NotBoundary: c.NotBoundary,
-		}
-	}
-	return result
+	return tagpkg.FormatCategoriesForPrompt(tagpkg.ConvertCategoryDefs(defs))
 }
 
 func (p *NewsPipeline) loadCategories() ([]types.CategoryDef, error) {

@@ -44,7 +44,7 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, data *types.DigestData
 			Category:     "简报",
 			Source:       "多源",
 			PublishedAt:  now,
-			FactSummary:  truncateForHistory("暂无内容"),
+			FactSummary:  "暂无内容",
 		}
 		if err := p.appendHistoryRecord(record); err != nil {
 			return nil, fmt.Errorf("append history: %w", err)
@@ -141,7 +141,7 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []type
 			}
 			texts[i] = item.DisplayTitle + " " + summary
 		}
-		vecs, err := CachedEmbedStrings(ctx, p, texts)
+		vecs, err := p.Embedding.EmbedStrings(ctx, texts)
 		if err == nil && len(vecs) == len(items) {
 			embeddings = vecs
 		}
@@ -191,13 +191,4 @@ func (p *NewsPipeline) appendHistoryRecord(record types.PushHistoryRecord) error
 	}
 	_, err = f.Write(append(line, '\n'))
 	return err
-}
-
-// truncateForHistory truncates text for history storage.
-func truncateForHistory(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > 500 {
-		return s[:500] + "..."
-	}
-	return s
 }

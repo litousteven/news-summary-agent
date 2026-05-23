@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/litousteven/news-summary-agent/pipeline/embedding"
 	fetchrss "github.com/litousteven/news-summary-agent/pipeline/fetch_rss"
 	types "github.com/litousteven/news-summary-agent/pipeline/types"
 )
@@ -111,14 +112,14 @@ func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []types.Merged
 	for i, item := range items {
 		texts[i] = item.DisplayTitle + " " + item.Summary
 	}
-	vecs, err := CachedEmbedStrings(ctx, p, texts)
+	vecs, err := embedding.CachedEmbedStrings(ctx, p.EmbedCache, p.Embedding, texts)
 	if err != nil || len(vecs) != len(items) {
 		return
 	}
 
 	for i := 0; i < len(items); i++ {
 		for j := i + 1; j < len(items); j++ {
-			sim := cosineSimilarity(vecs[i], vecs[j])
+			sim := embedding.CosineSimilarity(vecs[i], vecs[j])
 			if sim >= p.GetClusterThreshold() && sim < 1.0 {
 				refA := types.NewsReference{
 					DisplayTitle: items[j].DisplayTitle,
