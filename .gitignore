@@ -9,6 +9,7 @@ news_summary
 *.out
 *.json
 *.jsonl
+categories.json
 
 # Environment
 .env
