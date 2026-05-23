@@ -107,6 +107,8 @@ func TagNewItems(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			log.Printf("[ParallelTag] batch %d/%d 开始（%d 条）", idx+1, len(batches), len(b))
+
 			vars := FormatBatchTagPromptVars(b, categoriesText, guide, examples)
 
 			var tagged []types.TaggedNewsItem
@@ -149,6 +151,8 @@ func TagNewItems(
 				}
 				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃，重试 %d 次后仍失败）: error=%v | items_preview=%q | total_count=%v",
 					idx+1, len(batches), cfg.MaxRetries, lastErr, truncatedItems, vars["total_count"])
+			} else {
+				log.Printf("[ParallelTag] batch %d/%d 成功（%d 条标注）", idx+1, len(batches), len(tagged))
 			}
 			results[idx] = batchResult{items: tagged, err: lastErr, index: idx}
 		}(i, batch)
