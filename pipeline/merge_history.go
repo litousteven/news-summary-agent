@@ -25,6 +25,8 @@ type embedCandidate struct {
 // mergeHistory merges tagged news items with push history for deduplication.
 // Strategy: link exact match > display_title exact match > embedding screening > LLM verification.
 func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNewsItem) ([]types.MergedNewsItem, error) {
+	mergeStart := time.Now()
+	log.Printf("[MergeHistory] === 开始: %d 条待合并 ===", len(items))
 	merged := make([]types.MergedNewsItem, len(items))
 	for i, item := range items {
 		merged[i] = types.MergedNewsItem{TaggedNewsItem: item}
@@ -60,6 +62,7 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 			}
 		}
 		if len(missing) > 0 {
+			log.Printf("[MergeHistory] 历史记录中有 %d 条缺少 embedding，开始补算...", len(missing))
 			vecs, err := p.Embedding.EmbedStrings(ctx, missing)
 			if err == nil && len(vecs) == len(missing) {
 				for j, idx := range missingIdx {
@@ -67,6 +70,9 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 					historyWithEmbed = append(historyWithEmbed, &history[idx])
 					historyEmbeds = append(historyEmbeds, vecs[j])
 				}
+				log.Printf("[MergeHistory] 历史记录 embedding 补算完成: %d 条", len(missing))
+			} else {
+				log.Printf("[MergeHistory] 历史记录 embedding 补算失败: error=%v, expected=%d, got=%d", err, len(missing), len(vecs))
 			}
 		}
 	}
@@ -77,9 +83,13 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 		for i, item := range merged {
 			texts[i] = item.DisplayTitle + " " + item.Summary
 		}
+		log.Printf("[MergeHistory] 开始计算 %d 条新闻的 embedding...", len(texts))
 		vecs, err := p.Embedding.EmbedStrings(ctx, texts)
 		if err == nil && len(vecs) == len(merged) {
 			itemEmbeds = vecs
+			log.Printf("[MergeHistory] 新闻 embedding 计算完成: %d 条", len(vecs))
+		} else {
+			log.Printf("[MergeHistory] 新闻 embedding 计算失败: error=%v, expected=%d, got=%d（将跳过语义去重）", err, len(merged), len(vecs))
 		}
 	}
 
@@ -142,7 +152,10 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 	}
 
 	if len(llmCandidates) > 0 && p.ChatModel != nil {
+		log.Printf("[MergeHistory] 开始 LLM 核查 %d 对候选新闻...", len(llmCandidates))
+		verifyStart := time.Now()
 		verified, err := p.llmVerifyDuplicatesMerged(ctx, merged, llmCandidates)
+		log.Printf("[MergeHistory] LLM 核查完成: 耗时=%v, error=%v", time.Since(verifyStart), err)
 		if err != nil {
 			log.Printf("[MergeHistory] LLM核查失败: %v，回退到embedding直接判重", err)
 			for _, c := range llmCandidates {
@@ -180,6 +193,15 @@ func (p *NewsPipeline) mergeHistory(ctx context.Context, items []types.TaggedNew
 			merged[i].Refs = merged[i].Refs[:2]
 		}
 	}
+
+	seenCount := 0
+	for i := range merged {
+		if merged[i].SeenBefore {
+			seenCount++
+		}
+	}
+	log.Printf("[MergeHistory] === 完成: 总数=%d, 历史重复=%d, 新增=%d, LLM候选=%d, 耗时=%v ===",
+		len(merged), seenCount, len(merged)-seenCount, len(llmCandidates), time.Since(mergeStart))
 
 	return merged, nil
 }

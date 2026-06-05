@@ -15,6 +15,8 @@ import (
 )
 
 func (p *NewsPipeline) recordHistory(ctx context.Context, data *types.DigestData) (*types.NewsSummaryResult, error) {
+	recordStart := time.Now()
+	log.Printf("[RecordHistory] === 开始: %d 条 digest items ===", len(data.Items))
 	message := buildFinalMessage(data)
 
 	result := &types.NewsSummaryResult{
@@ -51,6 +53,7 @@ func (p *NewsPipeline) recordHistory(ctx context.Context, data *types.DigestData
 		}
 	}
 
+	log.Printf("[RecordHistory] === 完成: 耗时 %v ===", time.Since(recordStart))
 	return result, nil
 }
 
@@ -141,9 +144,13 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []type
 			}
 			texts[i] = item.DisplayTitle + " " + summary
 		}
+		log.Printf("[RecordHistory] 开始计算 %d 条 digest items 的 embedding...", len(texts))
 		vecs, err := p.Embedding.EmbedStrings(ctx, texts)
 		if err == nil && len(vecs) == len(items) {
 			embeddings = vecs
+			log.Printf("[RecordHistory] digest embedding 计算完成: %d 条", len(vecs))
+		} else {
+			log.Printf("[RecordHistory] digest embedding 计算失败: error=%v", err)
 		}
 	}
 
@@ -172,6 +179,7 @@ func (p *NewsPipeline) RecordHistoryFromDigest(ctx context.Context, items []type
 		}
 	}
 
+	log.Printf("[RecordHistory] === 完成: %d 条记录已写入 ===", len(items))
 	return nil
 }
 

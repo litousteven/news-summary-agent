@@ -17,7 +17,9 @@ import (
 )
 
 func TranslateItems(ctx context.Context, chatModel model.BaseChatModel, data *types.DigestData, cfg config.TagBatchConfig) (*types.DigestData, error) {
-	log.Printf("[TranslateItems] Start, total items: %d", len(data.Items))
+	translateStart := time.Now()
+	log.Printf("[TranslateItems] === Start: total items=%d, max_concurrent=%d, max_retries=%d, timeout=%v ===",
+		len(data.Items), cfg.MaxConcurrentBatches, cfg.MaxRetries, cfg.BatchTimeout)
 	if chatModel == nil {
 		log.Printf("[TranslateItems] ChatModel is nil, skipping")
 		return data, nil
@@ -60,7 +62,10 @@ func TranslateItems(ctx context.Context, chatModel model.BaseChatModel, data *ty
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			itemStart := time.Now()
 			sem <- struct{}{}
+			semAcquireTime := time.Now()
+			log.Printf("[TranslateItems] Item [%d] 获取信号量成功（等待 %v）", i, semAcquireTime.Sub(itemStart))
 			defer func() { <-sem }()
 
 			item := data.Items[i]
@@ -82,22 +87,28 @@ func TranslateItems(ctx context.Context, chatModel model.BaseChatModel, data *ty
 					select {
 					case <-ctx.Done():
 						callErr = ctx.Err()
+						log.Printf("[TranslateItems] Item [%d] context 已取消，中止重试: %v", i, callErr)
 						break retryLoop
 					case <-time.After(backoff):
 					}
 				}
 
+				callStart := time.Now()
 				callCtx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout)
 				resp, callErr = chatModel.Generate(callCtx, messages)
 				cancel()
+				callElapsed := time.Since(callStart)
 
 				if callErr == nil {
+					log.Printf("[TranslateItems] Item [%d] 第 %d 次 LLM 调用成功（耗时 %v）", i, attempt+1, callElapsed)
 					break
 				}
-				log.Printf("[TranslateItems] Item [%d] 第 %d 次尝试失败: %v", i, attempt+1, callErr)
+				log.Printf("[TranslateItems] Item [%d] 第 %d 次尝试失败（耗时 %v）: %v", i, attempt+1, callElapsed, callErr)
 			}
 
+			itemElapsed := time.Since(itemStart)
 			if callErr != nil {
+				log.Printf("[TranslateItems] Item [%d] 重试耗尽（共 %d 次）: %v | 总耗时=%v", i, cfg.MaxRetries+1, callErr, itemElapsed)
 				log.Printf("[TranslateItems] Item [%d] 重试耗尽（共 %d 次）: %v", i, cfg.MaxRetries+1, callErr)
 				mu.Lock()
 				failed++
@@ -105,7 +116,7 @@ func TranslateItems(ctx context.Context, chatModel model.BaseChatModel, data *ty
 				return
 			}
 			if resp == nil {
-				log.Printf("[TranslateItems] Item [%d] ChatModel.Generate returned nil response", i)
+				log.Printf("[TranslateItems] Item [%d] ChatModel.Generate returned nil response | 总耗时=%v", i, itemElapsed)
 				mu.Lock()
 				failed++
 				mu.Unlock()
@@ -116,7 +127,7 @@ func TranslateItems(ctx context.Context, chatModel model.BaseChatModel, data *ty
 
 			result := ParseTranslateResponse(resp.Content)
 			if result == nil {
-				log.Printf("[TranslateItems] Item [%d] failed to parse JSON response, raw: %s", i, resp.Content)
+				log.Printf("[TranslateItems] Item [%d] failed to parse JSON response, raw: %s | 总耗时=%v", i, resp.Content, itemElapsed)
 				mu.Lock()
 				failed++
 				mu.Unlock()
@@ -134,13 +145,14 @@ func TranslateItems(ctx context.Context, chatModel model.BaseChatModel, data *ty
 				log.Printf("[TranslateItems] Item [%d] summary updated", i)
 			}
 			translated++
+			log.Printf("[TranslateItems] Item [%d] 翻译完成 | 总耗时=%v", i, itemElapsed)
 			mu.Unlock()
 		}(idx)
 	}
 	wg.Wait()
 
-	log.Printf("[TranslateItems] Done: %d translated, %d failed, %d total",
-		translated, failed, len(toTranslate))
+	log.Printf("[TranslateItems] === Done: %d translated, %d failed, %d total, 总耗时 %v ===",
+		translated, failed, len(toTranslate), time.Since(translateStart))
 
 	return data, nil
 }

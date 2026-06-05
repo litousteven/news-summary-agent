@@ -92,6 +92,7 @@ func embedHash(text string) string {
 // CachedEmbedStrings wraps the Embedding model with per-day persistent caching.
 // For each text, it checks the cache first and only calls the model for cache misses.
 func CachedEmbedStrings(ctx context.Context, ec *EmbeddingCache, embedding EmbeddingClient, texts []string) ([][]float64, error) {
+	start := time.Now()
 	hashes := make([]string, len(texts))
 	for i, t := range texts {
 		hashes[i] = embedHash(t)
@@ -101,23 +102,28 @@ func CachedEmbedStrings(ctx context.Context, ec *EmbeddingCache, embedding Embed
 	results := make([][]float64, len(texts))
 	var missTexts []string
 	var missIdx []int
+	hitCount := 0
 	for i, hash := range hashes {
 		if vec, ok := ec.Get(hash); ok {
 			results[i] = vec
+			hitCount++
 		} else {
 			missTexts = append(missTexts, texts[i])
 			missIdx = append(missIdx, i)
 		}
 	}
+	log.Printf("[EmbeddingCache] 缓存查询: 总数=%d, 命中=%d, 未命中=%d", len(texts), hitCount, len(missTexts))
 
 	// Embed only the misses
 	if len(missTexts) > 0 {
 		vecs, err := embedding.EmbedStrings(ctx, missTexts)
 		if err != nil || len(vecs) != len(missTexts) {
+			log.Printf("[EmbeddingCache] API 调用失败或返回数量不匹配: error=%v, expected=%d, got=%d", err, len(missTexts), len(vecs))
 			if len(missIdx) == len(texts) {
 				return nil, err // all were misses, return error
 			}
 			// partial: fill misses with nil, return what we have
+			log.Printf("[EmbeddingCache] 部分失败，返回缓存命中的 %d 条结果", hitCount)
 			return results, nil
 		}
 		for j, idx := range missIdx {
@@ -126,5 +132,6 @@ func CachedEmbedStrings(ctx context.Context, ec *EmbeddingCache, embedding Embed
 		}
 	}
 
+	log.Printf("[EmbeddingCache] 完成: 总数=%d, 耗时=%v", len(texts), time.Since(start))
 	return results, nil
 }
