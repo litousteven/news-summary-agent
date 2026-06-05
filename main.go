@@ -83,12 +83,17 @@ func main() {
 	// Cleanup expired data files before pipeline run
 	p.CleanupExpiredFiles()
 
+	pipelineStart := time.Now()
+	log.Printf("[Pipeline] ========== Pipeline 开始执行 (slot=%s) ==========", *slot)
+
 	result, err := p.Run(ctx, &types.NewsSummaryRequest{
 		Slot: *slot,
 	})
 	if err != nil {
 		log.Fatalf("Pipeline执行失败: %v", err)
 	}
+
+	log.Printf("[Pipeline] ========== Pipeline 执行完成，总耗时 %v ==========", time.Since(pipelineStart))
 
 	fmt.Println("========== 新闻简报 ==========")
 	fmt.Println(result.Message)

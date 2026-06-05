@@ -86,8 +86,13 @@ func TagNewItems(
 	examples string,
 	cfg config.TagBatchConfig,
 ) ([]types.TaggedNewsItem, error) {
+	tagStart := time.Now()
+	log.Printf("[ParallelTag] === TagNewItems 开始: %d 条待标注, batch_size=%d, max_concurrent=%d, max_retries=%d, timeout=%v ===",
+		len(items), cfg.BatchSize, cfg.MaxConcurrentBatches, cfg.MaxRetries, cfg.BatchTimeout)
+
 	batchItems := ToBatchItems(items)
 	batches := SplitBatches(batchItems, cfg.BatchSize)
+	log.Printf("[ParallelTag] 分为 %d 个批次", len(batches))
 
 	type batchResult struct {
 		items []types.TaggedNewsItem
@@ -103,8 +108,11 @@ func TagNewItems(
 		wg.Add(1)
 		go func(idx int, b []BatchItem) {
 			defer wg.Done()
+			batchStartTime := time.Now()
 
 			sem <- struct{}{}
+			semAcquireTime := time.Now()
+			log.Printf("[ParallelTag] batch %d/%d 获取信号量成功（等待 %v）", idx+1, len(batches), semAcquireTime.Sub(batchStartTime))
 			defer func() { <-sem }()
 
 			log.Printf("[ParallelTag] batch %d/%d 开始（%d 条）", idx+1, len(batches), len(b))
@@ -122,16 +130,21 @@ func TagNewItems(
 					select {
 					case <-ctx.Done():
 						lastErr = ctx.Err()
+						log.Printf("[ParallelTag] batch %d/%d context 已取消，中止重试: %v", idx+1, len(batches), lastErr)
 						break retryLoop
 					case <-time.After(backoff):
 					}
 				}
 
+				invokeStart := time.Now()
 				batchCtx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout)
 				tagged, lastErr = tagGraph.Invoke(batchCtx, vars)
 				cancel()
+				invokeElapsed := time.Since(invokeStart)
 
 				if lastErr == nil {
+					log.Printf("[ParallelTag] batch %d/%d 第 %d 次调用 LLM 成功（耗时 %v，返回 %d 条）",
+						idx+1, len(batches), attempt+1, invokeElapsed, len(tagged))
 					break
 				}
 				newsItemsStr, _ := vars["news_items"].(string)
@@ -139,20 +152,21 @@ func TagNewItems(
 				if len(truncatedItems) > 300 {
 					truncatedItems = truncatedItems[:300] + "..."
 				}
-				log.Printf("[ParallelTag] batch %d/%d 第 %d 次尝试失败: error=%v | items_preview=%q",
-					idx+1, len(batches), attempt+1, lastErr, truncatedItems)
+				log.Printf("[ParallelTag] batch %d/%d 第 %d 次尝试失败（耗时 %v）: error=%v | items_preview=%q",
+					idx+1, len(batches), attempt+1, invokeElapsed, lastErr, truncatedItems)
 			}
 
+			batchElapsed := time.Since(batchStartTime)
 			if lastErr != nil {
 				newsItemsStr, _ := vars["news_items"].(string)
 				truncatedItems := newsItemsStr
 				if len(truncatedItems) > 500 {
 					truncatedItems = truncatedItems[:500] + "..."
 				}
-				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃，重试 %d 次后仍失败）: error=%v | items_preview=%q | total_count=%v",
-					idx+1, len(batches), cfg.MaxRetries, lastErr, truncatedItems, vars["total_count"])
+				log.Printf("[ParallelTag] batch %d/%d 失败（已丢弃，重试 %d 次后仍失败）: error=%v | items_preview=%q | total_count=%v | 总耗时=%v",
+					idx+1, len(batches), cfg.MaxRetries, lastErr, truncatedItems, vars["total_count"], batchElapsed)
 			} else {
-				log.Printf("[ParallelTag] batch %d/%d 成功（%d 条标注）", idx+1, len(batches), len(tagged))
+				log.Printf("[ParallelTag] batch %d/%d 成功（%d 条标注，总耗时 %v）", idx+1, len(batches), len(tagged), batchElapsed)
 			}
 			results[idx] = batchResult{items: tagged, err: lastErr, index: idx}
 		}(i, batch)
@@ -168,9 +182,11 @@ func TagNewItems(
 	}
 
 	if len(allTagged) == 0 {
-		log.Printf("[ParallelTag] 所有 %d 个批次均失败；继续处理，无新标注项", len(batches))
+		log.Printf("[ParallelTag] 所有 %d 个批次均失败；继续处理，无新标注项（总耗时 %v）", len(batches), time.Since(tagStart))
 		return nil, nil
 	}
+
+	log.Printf("[ParallelTag] === TagNewItems 完成: %d 条标注成功，总耗时 %v ===", len(allTagged), time.Since(tagStart))
 
 	return allTagged, nil
 }

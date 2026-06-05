@@ -21,7 +21,9 @@ type itemSummaryResult struct {
 }
 
 func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *types.DigestData, cfg config.TagBatchConfig) (*types.DigestData, error) {
-	log.Printf("[SummarizePerItem] Start, total items: %d", len(data.Items))
+	summarizeStart := time.Now()
+	log.Printf("[SummarizePerItem] === Start: total items=%d, max_concurrent=%d, max_retries=%d, timeout=%v ===",
+		len(data.Items), cfg.MaxConcurrentBatches, cfg.MaxRetries, cfg.BatchTimeout)
 	if chatModel == nil {
 		log.Printf("[SummarizePerItem] ChatModel is nil, skipping")
 		return data, nil
@@ -41,7 +43,10 @@ func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			itemStart := time.Now()
 			sem <- struct{}{}
+			semAcquireTime := time.Now()
+			log.Printf("[SummarizePerItem] Item [%d] 获取信号量成功（等待 %v）", idx, semAcquireTime.Sub(itemStart))
 			defer func() { <-sem }()
 
 			item := &data.Items[idx]
@@ -63,22 +68,28 @@ func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *
 					select {
 					case <-ctx.Done():
 						callErr = ctx.Err()
+						log.Printf("[SummarizePerItem] Item [%d] context 已取消，中止重试: %v", idx, callErr)
 						break retryLoop
 					case <-time.After(backoff):
 					}
 				}
 
+				callStart := time.Now()
 				callCtx, cancel := context.WithTimeout(ctx, cfg.BatchTimeout)
 				resp, callErr = chatModel.Generate(callCtx, messages)
 				cancel()
+				callElapsed := time.Since(callStart)
 
 				if callErr == nil {
+					log.Printf("[SummarizePerItem] Item [%d] 第 %d 次 LLM 调用成功（耗时 %v）", idx, attempt+1, callElapsed)
 					break
 				}
-				log.Printf("[SummarizePerItem] Item [%d] 第 %d 次尝试失败: %v", idx, attempt+1, callErr)
+				log.Printf("[SummarizePerItem] Item [%d] 第 %d 次尝试失败（耗时 %v）: %v", idx, attempt+1, callElapsed, callErr)
 			}
 
+			itemElapsed := time.Since(itemStart)
 			if callErr != nil {
+				log.Printf("[SummarizePerItem] Item [%d] 重试耗尽（共 %d 次）: %v | 总耗时=%v", idx, cfg.MaxRetries+1, callErr, itemElapsed)
 				log.Printf("[SummarizePerItem] Item [%d] 重试耗尽（共 %d 次）: %v", idx, cfg.MaxRetries+1, callErr)
 				mu.Lock()
 				failed++
@@ -86,7 +97,7 @@ func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *
 				return
 			}
 			if resp == nil {
-				log.Printf("[SummarizePerItem] Item [%d] ChatModel.Generate returned nil response", idx)
+				log.Printf("[SummarizePerItem] Item [%d] ChatModel.Generate returned nil response | 总耗时=%v", idx, itemElapsed)
 				mu.Lock()
 				failed++
 				mu.Unlock()
@@ -97,7 +108,7 @@ func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *
 
 			result := parseItemSummaryResponse(resp.Content)
 			if result == nil || result.Summary == "" {
-				log.Printf("[SummarizePerItem] Item [%d] failed to parse summary JSON, raw: %s", idx, resp.Content)
+				log.Printf("[SummarizePerItem] Item [%d] failed to parse summary JSON, raw: %s | 总耗时=%v", idx, resp.Content, itemElapsed)
 				mu.Lock()
 				failed++
 				mu.Unlock()
@@ -107,13 +118,13 @@ func SummarizePerItem(ctx context.Context, chatModel model.BaseChatModel, data *
 			mu.Lock()
 			data.Items[idx].ItemSummary = result.Summary
 			success++
-			log.Printf("[SummarizePerItem] Item [%d] summary set (%d chars): %s", idx, len(result.Summary), result.Summary)
+			log.Printf("[SummarizePerItem] Item [%d] summary set (%d chars): %s | 总耗时=%v", idx, len(result.Summary), result.Summary, itemElapsed)
 			mu.Unlock()
 		}(i)
 	}
 	wg.Wait()
 
-	log.Printf("[SummarizePerItem] Done: %d success, %d failed, %d total", success, failed, len(data.Items))
+	log.Printf("[SummarizePerItem] === Done: %d success, %d failed, %d total, 总耗时 %v ===", success, failed, len(data.Items), time.Since(summarizeStart))
 	return data, nil
 }
 

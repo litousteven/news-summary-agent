@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"time"
 )
 
 // EmbeddingClient is the interface for OpenAI-compatible embedding APIs.
@@ -29,7 +31,7 @@ func NewOpenAIEmbeddingClient(baseURL, apiKey, model string) *OpenAIEmbeddingCli
 		BaseURL:    baseURL,
 		APIKey:     apiKey,
 		Model:      model,
-		HTTPClient: &http.Client{},
+		HTTPClient: &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -56,6 +58,9 @@ func (c *OpenAIEmbeddingClient) EmbedStrings(ctx context.Context, texts []string
 		return nil, nil
 	}
 
+	start := time.Now()
+	log.Printf("[Embedding] EmbedStrings 开始: %d 条文本, model=%s, base_url=%s", len(texts), c.Model, c.BaseURL)
+
 	reqBody := embeddingRequest{
 		Model: c.Model,
 		Input: texts,
@@ -74,8 +79,11 @@ func (c *OpenAIEmbeddingClient) EmbedStrings(ctx context.Context, texts []string
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
 
+	httpStart := time.Now()
 	resp, err := c.HTTPClient.Do(req)
+	httpElapsed := time.Since(httpStart)
 	if err != nil {
+		log.Printf("[Embedding] HTTP 请求失败（耗时 %v）: %v", httpElapsed, err)
 		return nil, fmt.Errorf("call embedding API: %w", err)
 	}
 	defer resp.Body.Close()
@@ -86,6 +94,7 @@ func (c *OpenAIEmbeddingClient) EmbedStrings(ctx context.Context, texts []string
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		log.Printf("[Embedding] API 返回错误 status=%d（耗时 %v）: %s", resp.StatusCode, httpElapsed, string(body))
 		return nil, fmt.Errorf("embedding API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -101,6 +110,16 @@ func (c *OpenAIEmbeddingClient) EmbedStrings(ctx context.Context, texts []string
 			result[d.Index] = d.Embedding
 		}
 	}
+
+	totalElapsed := time.Since(start)
+	validCount := 0
+	for _, v := range result {
+		if len(v) > 0 {
+			validCount++
+		}
+	}
+	log.Printf("[Embedding] EmbedStrings 完成: %d 条请求, %d 条有效向量, HTTP耗时=%v, 总耗时=%v",
+		len(texts), validCount, httpElapsed, totalElapsed)
 
 	return result, nil
 }

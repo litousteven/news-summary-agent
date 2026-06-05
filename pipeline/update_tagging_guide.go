@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 
@@ -15,7 +16,10 @@ import (
 )
 
 func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *types.NewsSummaryResult) (*types.NewsSummaryResult, error) {
+	updateStart := time.Now()
+	log.Printf("[UpdateTaggingGuide] === 开始: digest_items=%d ===", len(result.DigestItems))
 	if len(result.DigestItems) == 0 {
+		log.Printf("[UpdateTaggingGuide] 无 digest items，跳过")
 		return result, nil
 	}
 
@@ -85,11 +89,14 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *types.New
 		schema.UserMessage(prompt),
 	}
 
+	llmStart := time.Now()
 	resp, err := p.ChatModel.Generate(ctx, messages)
+	llmElapsed := time.Since(llmStart)
 	if err != nil {
-		log.Printf("[UpdateTaggingGuide] LLM调用失败: %v", err)
+		log.Printf("[UpdateTaggingGuide] LLM调用失败（耗时 %v）: %v", llmElapsed, err)
 		return result, nil
 	}
+	log.Printf("[UpdateTaggingGuide] LLM调用成功（耗时 %v）", llmElapsed)
 
 	suggestion := strings.TrimSpace(resp.Content)
 	if suggestion == "无需调整" || suggestion == "" {
@@ -111,6 +118,7 @@ func (p *NewsPipeline) updateTaggingGuide(ctx context.Context, result *types.New
 	}
 
 	log.Printf("[UpdateTaggingGuide] categories.json 已更新")
+	log.Printf("[UpdateTaggingGuide] === 完成: 耗时 %v ===", time.Since(updateStart))
 	return result, nil
 }
 
