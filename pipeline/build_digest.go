@@ -17,7 +17,6 @@ import (
 
 // buildDigest selects, ranks, and formats news items into a digest.
 func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNewsItem) (*types.DigestData, error) {
-	digestStart := time.Now()
 	log.Printf("[BuildDigest] === 开始: %d 条 merged items ===", len(items))
 	merged := p.dedupAndLinkBatch(ctx, items)
 
