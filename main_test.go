@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/litousteven/news-summary-agent/pipeline/types"
 )
@@ -159,5 +160,32 @@ func TestWriteDigestMDRendersRefsAndCategories(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("输出缺少 %q\n--- 实际输出 ---\n%s", want, body)
 		}
+	}
+}
+
+// ChatModel 必须带 120s 超时，否则上游卡住会拖死整条管线（标注批次之外的调用
+// 没有别的兜底）。同时确认 JSON 模式只影响 response_format。
+func TestBuildChatModelConfigWiresTimeoutAndJSONMode(t *testing.T) {
+	plain := buildChatModelConfig("test-key", "https://example.com/v1", "test-model", false)
+
+	if plain.Timeout != 120*time.Second {
+		t.Errorf("ChatModel 超时应为 120s，实际 %v", plain.Timeout)
+	}
+	if plain.MaxTokens == nil || *plain.MaxTokens != 16384 {
+		t.Errorf("MaxTokens 应为 16384，实际 %v", plain.MaxTokens)
+	}
+	if plain.ResponseFormat != nil {
+		t.Errorf("非 JSON 模式不应设置 ResponseFormat，实际 %+v", plain.ResponseFormat)
+	}
+	if plain.APIKey != "test-key" || plain.BaseURL != "https://example.com/v1" || plain.Model != "test-model" {
+		t.Errorf("基础字段未正确透传: %+v", plain)
+	}
+
+	jsonCfg := buildChatModelConfig("test-key", "", "test-model", true)
+	if jsonCfg.ResponseFormat == nil || jsonCfg.ResponseFormat.Type != "json_object" {
+		t.Errorf("JSON 模式应设置 response_format=json_object，实际 %+v", jsonCfg.ResponseFormat)
+	}
+	if jsonCfg.Timeout != 120*time.Second {
+		t.Errorf("JSON 模式同样需要超时，实际 %v", jsonCfg.Timeout)
 	}
 }

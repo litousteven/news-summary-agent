@@ -116,6 +116,33 @@ func main() {
 	}
 }
 
+// ChatModel 的共享参数。Timeout 是防挂起的关键：标注批次有自己的超时，
+// 但翻译/摘要/去重核查这些逐条调用只靠这个超时兜底，缺了它上游卡住会导致整条管线僵死。
+const (
+	chatModelMaxTokens = 16384
+	chatModelTimeout   = 120 * time.Second
+)
+
+// buildChatModelConfig assembles the OpenAI-compatible ChatModel config.
+// Split out from createChatModel so the wiring (timeout / json mode) can be
+// unit-tested without constructing a client or touching the network.
+func buildChatModelConfig(apiKey, baseURL, modelName string, jsonMode bool) *openai.ChatModelConfig {
+	maxTokens := chatModelMaxTokens
+	cfg := &openai.ChatModelConfig{
+		BaseURL:   baseURL,
+		Model:     modelName,
+		APIKey:    apiKey,
+		MaxTokens: &maxTokens,
+		Timeout:   chatModelTimeout,
+	}
+	if jsonMode {
+		cfg.ResponseFormat = &openai.ChatCompletionResponseFormat{
+			Type: "json_object",
+		}
+	}
+	return cfg
+}
+
 // createChatModel creates a single OpenAI-compatible ChatModel.
 // jsonMode=true forces response_format to json_object.
 func createChatModel(ctx context.Context, jsonMode bool) (model.BaseChatModel, error) {
@@ -130,18 +157,7 @@ func createChatModel(ctx context.Context, jsonMode bool) (model.BaseChatModel, e
 		return nil, fmt.Errorf("missing CHAT_MODEL_NAME")
 	}
 
-	maxTokens := 16384
-	cfg := &openai.ChatModelConfig{
-		BaseURL:   baseURL,
-		Model:     modelName,
-		APIKey:    apiKey,
-		MaxTokens: &maxTokens,
-	}
-	if jsonMode {
-		cfg.ResponseFormat = &openai.ChatCompletionResponseFormat{
-			Type: "json_object",
-		}
-	}
+	cfg := buildChatModelConfig(apiKey, baseURL, modelName, jsonMode)
 	chatModel, err := openai.NewChatModel(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create chat model: %w", err)
