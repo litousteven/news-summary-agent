@@ -23,10 +23,10 @@ file_expiry_days: 2
 # 每批次发送给 LLM 的新闻条数
 tag_batch_size: 5
 # 并行处理的批次数量上限
-tag_max_concurrent_batches: 2
+tag_max_concurrent_batches: 1
 # 单个批次失败后最大重试次数
-tag_max_retries: 2
+tag_max_retries: 3
 # 重试指数退避的基础延迟（秒）
 tag_retry_base_delay_seconds: 5
 # 单个批次的超时时间（秒）
-tag_batch_timeout_seconds: 180
+tag_batch_timeout_seconds: 300
