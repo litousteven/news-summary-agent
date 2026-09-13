@@ -182,7 +182,14 @@ func writeDigestMD(dataDir string, result *types.NewsSummaryResult) error {
 			currentCat = item.Category
 			b.WriteString(fmt.Sprintf("## %s\n\n", currentCat))
 		}
-		b.WriteString(fmt.Sprintf("- %s\n", item.FactParagraph))
+		// Prefer the LLM-generated Chinese summary (same rule as buildFinalMessage).
+		// FactParagraph is built before TranslateItems runs, so for en feeds it still
+		// contains the untranslated source text; ItemSummary is always Chinese.
+		summary := item.ItemSummary
+		if summary == "" {
+			summary = item.FactParagraph
+		}
+		b.WriteString(fmt.Sprintf("- %s\n", summary))
 		if item.Link != "" {
 			b.WriteString(fmt.Sprintf("  [%s](%s)\n", item.Source, item.Link))
 		} else {
