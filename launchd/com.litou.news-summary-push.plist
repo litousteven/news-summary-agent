@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.litou.news-summary-push</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/litou/DSH/news-summary-agent/scripts/news_push_cron.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/litou/DSH/news-summary-agent</string>
+
+    <!-- 每 6 小时：00:00 / 06:00 / 12:00 / 18:00（本机时区 Asia/Shanghai） -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict><key>Hour</key><integer>0</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>6</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>0</integer></dict>
+        <dict><key>Hour</key><integer>18</integer><key>Minute</key><integer>0</integer></dict>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/litou</string>
+        <key>LANG</key>
+        <string>zh_CN.UTF-8</string>
+    </dict>
+
+    <!-- 不设 ProcessType=Background：会被降到后台 QoS，拖慢启动（见项目 README 的坑） -->
+
+    <key>StandardOutPath</key>
+    <string>/Users/litou/DSH/news-summary-agent/runlogs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/litou/DSH/news-summary-agent/runlogs/launchd.err.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
