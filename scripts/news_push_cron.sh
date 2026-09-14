@@ -25,6 +25,13 @@ if [ -z "${NEWS_SITE_BASE_URL:-}" ] && [ -f "$PROJECT_DIR/.env" ]; then
   export NEWS_SITE_BASE_URL
 fi
 
+# DDNS 平时由常驻的 serve 进程每 5 分钟自查一次；这里再兜一道，防止 serve 没在跑时
+# 域名悄悄停在旧地址上（2026-09 就发生过：取 IP 的方法失效，域名一直指向旧 IP）。
+DDNS_ENABLED=""
+if [ -f "$PROJECT_DIR/.env" ]; then
+  DDNS_ENABLED="$(grep -E '^DDNS_ENABLED=' "$PROJECT_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r')"
+fi
+
 LOGDIR="$PROJECT_DIR/runlogs"
 mkdir -p "$LOGDIR"
 LOG="$LOGDIR/cron_$(date +%Y%m%d_%H%M%S).log"
@@ -76,6 +83,17 @@ if [ "$GENERATE_SITE" = "1" ]; then
   fi
 else
   log "[GENERATE_SITE=0] 跳过网页生成"
+fi
+
+# 域名保活兜底。失败只记日志，不影响推送。
+if [ "$DDNS_ENABLED" = "1" ]; then
+  if ./news-summary-agent -mode ddns; then
+    log "DDNS 同步完成"
+  else
+    log "DDNS 同步失败（不影响推送）"
+  fi
+else
+  log "[DDNS] 未启用，跳过"
 fi
 
 # 先用 headless 把 digest 压成《要点》。要点生成失败/超时不能挡住新闻本身，

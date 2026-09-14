@@ -15,6 +15,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/joho/godotenv"
 
+	"github.com/litousteven/news-summary-agent/ddns"
 	"github.com/litousteven/news-summary-agent/pipeline"
 	"github.com/litousteven/news-summary-agent/pipeline/embedding"
 	"github.com/litousteven/news-summary-agent/pipeline/types"
@@ -22,7 +23,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "pipeline", "运行模式: pipeline(跑管线) / site(生成静态站点) / serve(对外提供网页)")
+	mode := flag.String("mode", "pipeline", "运行模式: pipeline(跑管线) / site(生成站点) / serve(提供网页) / ddns(一次性同步域名)")
 	slot := flag.String("slot", "manual", "推送档位: 00:00 / 12:00 / 18:00 / manual")
 	configDir := flag.String("config", "./config", "配置目录路径")
 	dataDir := flag.String("data", "./data", "数据目录路径 (运行时产出)")
@@ -39,12 +40,12 @@ func main() {
 
 	// site / serve 不依赖 ChatModel，必须在创建模型之前分流：常驻的网页服务
 	// 不该要求 API key，也不该占用模型配额。
-	if *mode == "site" || *mode == "serve" {
+	if *mode == "site" || *mode == "serve" || *mode == "ddns" {
 		runSiteMode(*mode, *dataDir, *publicDir, *addr, *baseURL, *siteToken)
 		return
 	}
 	if *mode != "pipeline" {
-		log.Fatalf("未知 -mode=%q（可选: pipeline / site / serve）", *mode)
+		log.Fatalf("未知 -mode=%q（可选: pipeline / site / serve / ddns）", *mode)
 	}
 
 	ctx := context.Background()
@@ -285,6 +286,7 @@ func runSiteMode(mode, dataDir, publicDir, addr, baseURL, token string) {
 			log.Fatalf("[Site] 生成失败: %v", err)
 		}
 	case "serve":
+		startDDNSIfEnabled()
 		if err := site.Serve(site.ServerOptions{
 			Addr:      addr,
 			PublicDir: publicDir,
@@ -292,5 +294,58 @@ func runSiteMode(mode, dataDir, publicDir, addr, baseURL, token string) {
 		}); err != nil {
 			log.Fatalf("[Site] 服务退出: %v", err)
 		}
+	case "ddns":
+		runDDNSOnce()
 	}
+}
+
+// startDDNSIfEnabled attaches the DDNS keeper to the site server, so the domain
+// follows the machine's public IP for as long as the page is being served. A
+// misconfigured DDNS must not take the site down, so failures are logged.
+func startDDNSIfEnabled() {
+	cfg, enabled, err := ddns.ConfigFromEnv()
+	if err != nil {
+		log.Printf("[DDNS] 配置错误，跳过: %v", err)
+		return
+	}
+	if !enabled {
+		return
+	}
+	svc, err := ddns.New(cfg)
+	if err != nil {
+		log.Printf("[DDNS] 初始化失败，跳过: %v", err)
+		return
+	}
+	go svc.Run(context.Background())
+}
+
+// runDDNSOnce performs a single check-and-update, for manual runs and tests.
+func runDDNSOnce() {
+	cfg, enabled, err := ddns.ConfigFromEnv()
+	if err != nil {
+		log.Fatalf("[DDNS] 配置错误: %v", err)
+	}
+	if !enabled {
+		log.Fatalf("[DDNS] 未启用：在 .env 里设置 DDNS_ENABLED=1 及相关变量")
+	}
+	svc, err := ddns.New(cfg)
+	if err != nil {
+		log.Fatalf("[DDNS] 初始化失败: %v", err)
+	}
+	res, err := svc.CheckAndUpdate(context.Background())
+	if err != nil {
+		log.Fatalf("[DDNS] 失败: %v", err)
+	}
+	if res.Updated {
+		log.Printf("[DDNS] 已更新 %s → %s（原记录 %s）", cfg.Domain, res.PublicIP, displayDNSIP(res.DNSIP))
+		return
+	}
+	log.Printf("[DDNS] 无需更新，记录已是 %s", res.PublicIP)
+}
+
+func displayDNSIP(ip string) string {
+	if strings.TrimSpace(ip) == "" {
+		return "无"
+	}
+	return ip
 }

@@ -430,6 +430,65 @@ curl -s http://127.0.0.1:9000/healthz
 
 ---
 
+## DDNS（让域名跟上公网 IP）
+
+`-mode serve` 会顺带把域名保活：`ddns` 包定时对比本机公网 IP 与 GoDaddy 上的 DNS
+记录，不一致就改写记录。移植自 `~/.openclaw/workspace-main/video-server/pkg/ddns`，
+但修掉了三个会安静失效的问题。
+
+```
+serve 进程
+  └─ 后台 goroutine（每 DDNS_CHECK_INTERVAL，默认 300s）
+        ├─ 探测公网 IP（多个回显源，逐个回退）
+        ├─ 读 GoDaddy 记录
+        └─ 不一致 → PUT 新记录
+
+./news-summary-agent -mode ddns     # 一次性同步，可手工执行
+```
+
+### 相对原版的改动
+
+| 原版 | 现在 | 原因 |
+|------|------|------|
+| 只抓 `ip.cn` | **ip.cn 仍是首选**，另加回退源 | ip.cn 本身没问题；加回退只是为了单点故障时不至于整个 DDNS 停摆 |
+| 只支持 A 记录 | A / AAAA 可选 | 本机有公网 IPv6；且 A 记录遇到纯 IPv6 响应应报错，而不是写错地址族 |
+| `updateDNSRecord` 的返回值被丢弃 | 失败会传播 | 原版 PUT 失败也向调用方报「已更新」 |
+| 配置文件 `config/ddns.json` | 环境变量（`.env`） | 凭据不能进 git 仓库 |
+
+> **ip.cn 必须带浏览器 UA。** 不带 UA 时它返回的页面里没有 `_ticket`，
+> 用裸 `curl https://ip.cn | grep _ticket` 去测会得出「ip.cn 已失效」的**错误**结论。
+> 实现里两步请求统一使用 `browserUA`，并有
+> `TestIPCNProvider_TwoStepFlowAndUserAgent` 锁住这个前提。
+
+另外两条硬约束：
+
+- **探测公网 IP 时绝不走代理**。走代理拿到的是代理出口地址，写进 DNS 会把域名指向代理。
+  只有访问 `api.godaddy.com` 才用 `DDNS_PROXY`。
+- **只接受公网单播地址**，回环 / 内网 / 链路本地一律拒绝。
+
+### 配置
+
+放项目根 `.env`（已 gitignore，权限建议 600）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DDNS_ENABLED` | `0` | `1` 开启；关闭时 serve 不会启动后台检查 |
+| `DDNS_DOMAIN` | — | 如 `cozyfish.site` |
+| `DDNS_RECORD` | `@` | 子域名；`@` 表示根域 |
+| `DDNS_RECORD_TYPE` | `A` | `A` 或 `AAAA` |
+| `DDNS_API_KEY` / `DDNS_API_SECRET` | — | GoDaddy API 凭据（以 sso-key 形式发送） |
+| `DDNS_TTL` | `600` | 低于 600 会被抬到 600（GoDaddy 限制） |
+| `DDNS_CHECK_INTERVAL` | `300` | 秒 |
+| `DDNS_PROXY` | 空 | 访问 GoDaddy API 用的代理 |
+
+```bash
+./news-summary-agent -mode ddns    # 立即同步一次并打印结果
+```
+
+> DNS 改动受 TTL 缓存影响，公共解析器最长要 `DDNS_TTL` 秒后才看得到新地址。
+
+---
+
 ## 与原 Skill 方案的对比
 
 | 维度 | 原 Skill (AI Agent) | 本方案 (Eino Graph) |
