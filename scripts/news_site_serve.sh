@@ -38,9 +38,10 @@ if [ ! -f "$PROJECT_DIR/public/index.html" ]; then
   ./news-summary-agent "${gen_args[@]}" || true
 fi
 
+# base_url 只在生成站点时使用（feed 的绝对链接），serve 模式不需要它；
+# 页面内部一律用相对链接，因此换端口/域名不必重启服务。
 args=(-mode serve -addr "$addr" -public "$PROJECT_DIR/public")
 [ -n "$token" ] && args+=(-site-token "$token")
-[ -n "$base_url" ] && args+=(-base-url "$base_url")
 
 echo "[news-site] 启动: addr=$addr token=$([ -n "$token" ] && echo 已设置 || echo 无)"
 exec ./news-summary-agent "${args[@]}"
