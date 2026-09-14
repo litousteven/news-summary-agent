@@ -97,11 +97,9 @@ func buildFinalMessage(data *types.DigestData) string {
 		items := byCategory[cat]
 		sb.WriteString(fmt.Sprintf("## %s\n\n", cat))
 		for _, item := range items {
-			summary := item.ItemSummary
-			if summary == "" {
-				summary = item.FactParagraph
-			}
-			sb.WriteString(fmt.Sprintf("- %s（%s）\n", summary, item.Source))
+			// RenderText keeps the publish date in front of the LLM summary,
+			// which would otherwise drop it (see DigestItem.DatePrefix).
+			sb.WriteString(fmt.Sprintf("- %s（%s）\n", item.RenderText(), item.Source))
 			for _, ref := range item.Refs {
 				label := ref.DisplayTitle
 				if ref.FactSummary != "" {

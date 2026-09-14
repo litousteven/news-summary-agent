@@ -131,6 +131,48 @@ func TestWriteDigestMDFallsBackToFactParagraph(t *testing.T) {
 	}
 }
 
+// 核心回归（对应 commit 294a24a 引入的副作用）：改用 ItemSummary 之后，
+// LLM 摘要会把 FactParagraph 里的日期洗掉，导致 7 周前的旧闻看起来像当天的。
+// DatePrefix 必须补回来；而回退到 FactParagraph 时不能重复加日期。
+func TestWriteDigestMDPreservesPublishDate(t *testing.T) {
+	dir := t.TempDir()
+
+	withSummary := digItem(
+		"经济与交通", "联合早报-中国", "https://example.com/quant",
+		"中国7月28日，量化砸盘成A股最大隐忧？",
+		"A股近期承压下行，晶片股遭抛售。",
+		nil,
+	)
+	withSummary.DatePrefix = "7月28日，"
+
+	fallback := digItem(
+		"自然灾害与气候事件", "NYT", "https://example.com/flood",
+		"南亚9月13日，喜马拉雅洪水过后，尼泊尔城镇被毁。",
+		"", // 摘要生成失败，回退 FactParagraph（已自带日期）
+		nil,
+	)
+
+	result := &types.NewsSummaryResult{
+		DigestItems: []types.DigestItem{withSummary, fallback},
+		Stats:       types.DigestStats{TotalFetched: 2, TotalTagged: 2, TotalSelected: 2},
+	}
+
+	if err := writeDigestMD(dir, result); err != nil {
+		t.Fatalf("writeDigestMD 返回错误: %v", err)
+	}
+	body := readOnlyDigestMD(t, dir)
+
+	if want := "- 7月28日，A股近期承压下行，晶片股遭抛售。"; !strings.Contains(body, want) {
+		t.Errorf("ItemSummary 分支应补回发布日期，期望包含 %q\n--- 实际输出 ---\n%s", want, body)
+	}
+	if want := "- 南亚9月13日，喜马拉雅洪水过后，尼泊尔城镇被毁。"; !strings.Contains(body, want) {
+		t.Errorf("回退分支应保持原样，期望包含 %q\n--- 实际输出 ---\n%s", want, body)
+	}
+	if strings.Contains(body, "7月28日，7月28日，") || strings.Contains(body, "南亚南亚") {
+		t.Errorf("日期或地区被重复拼接\n--- 实际输出 ---\n%s", body)
+	}
+}
+
 // Refs 仍按 markdown 链接渲染，且分类切换时会插入空行。
 func TestWriteDigestMDRendersRefsAndCategories(t *testing.T) {
 	dir := t.TempDir()

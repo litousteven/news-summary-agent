@@ -28,3 +28,6 @@ log/
 runlogs/
 *.log
 *.log.*
+
+# 静态站点生成产物（由 -mode site 生成）
+public/

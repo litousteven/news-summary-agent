@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# 每 6 小时运行一次新闻简报管线，并把生成的 digest 主动推送到 QQ 私聊。
+# 每 6 小时运行一次新闻简报管线，把最新 digest 压成《要点》后推送到 QQ 私聊：
+# 先发要点文本，再把简报原文（.md）作为文件附件发出。同时重建对外新闻网页。
 #
 # 由 launchd (com.litou.news-summary-push) 在 00:00 / 06:00 / 12:00 / 18:00 调用。
 # 手动调试:
-#   bash scripts/news_push_cron.sh                 # 完整跑一遍（约 3-6 分钟）
-#   SKIP_PIPELINE=1 bash scripts/news_push_cron.sh # 跳过管线，直接推送最新 digest
-#   DRY_RUN=1 bash scripts/news_push_cron.sh       # 只打印，不真的发 QQ
+#   bash scripts/news_push_cron.sh                  # 完整跑一遍（约 3-6 分钟）
+#   SKIP_PIPELINE=1 bash scripts/news_push_cron.sh  # 跳过管线，直接推送最新 digest
+#   DRY_RUN=1 bash scripts/news_push_cron.sh        # 只打印，不真的发 QQ
+#   GENERATE_BRIEF=0 bash scripts/news_push_cron.sh # 跳过要点生成，直接推原文
+#   GENERATE_SITE=0 bash scripts/news_push_cron.sh  # 跳过网页生成
 set -uo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,6 +16,14 @@ cd "$PROJECT_DIR"
 
 SKIP_PIPELINE="${SKIP_PIPELINE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
+GENERATE_BRIEF="${GENERATE_BRIEF:-1}"
+GENERATE_SITE="${GENERATE_SITE:-1}"
+
+# 站点对外地址只影响 feed 里的绝对链接；从 .env 取，避免写死在仓库里。
+if [ -z "${NEWS_SITE_BASE_URL:-}" ] && [ -f "$PROJECT_DIR/.env" ]; then
+  NEWS_SITE_BASE_URL="$(grep -E '^NEWS_SITE_BASE_URL=' "$PROJECT_DIR/.env" | tail -1 | cut -d= -f2- | tr -d '"'"'"' \r')"
+  export NEWS_SITE_BASE_URL
+fi
 
 LOGDIR="$PROJECT_DIR/runlogs"
 mkdir -p "$LOGDIR"
@@ -53,7 +64,44 @@ fi
 
 log "准备推送: $newest ($(wc -c <"$newest" | tr -d ' ') bytes)"
 
-push_args=("$newest")
+# 重建对外新闻网页。放在推送之前，这样即使 QQ 推送失败，网页也已经更新；
+# 失败只记日志，绝不影响推送。
+if [ "$GENERATE_SITE" = "1" ]; then
+  site_args=(-mode site -data ./data -public ./public)
+  [ -n "${NEWS_SITE_BASE_URL:-}" ] && site_args+=(-base-url "$NEWS_SITE_BASE_URL")
+  if ./news-summary-agent "${site_args[@]}"; then
+    log "新闻网页已更新: public/index.html"
+  else
+    log "新闻网页生成失败(exit=$?)，不影响推送"
+  fi
+else
+  log "[GENERATE_SITE=0] 跳过网页生成"
+fi
+
+# 先用 headless 把 digest 压成《要点》。要点生成失败/超时不能挡住新闻本身，
+# 所以失败时回退为直接推送简报原文。
+brief_ok=0
+brief=""
+if [ "$GENERATE_BRIEF" = "1" ]; then
+  brief="data/brief_$(date +%Y%m%d_%H%M%S).md"
+  log "生成要点: bash scripts/news_brief.sh $newest $brief"
+  if bash scripts/news_brief.sh "$newest" "$brief"; then
+    brief_ok=1
+    log "要点生成成功: $brief"
+  else
+    log "要点生成失败(exit=$?)，回退为直接推送简报原文"
+    rm -f "$brief"
+    brief=""
+  fi
+else
+  log "[GENERATE_BRIEF=0] 跳过要点生成，直接推送简报原文"
+fi
+
+if [ "$brief_ok" = "1" ]; then
+  push_args=("$brief" --file "$newest")
+else
+  push_args=("$newest")
+fi
 [ "$DRY_RUN" = "1" ] && push_args+=(--dry)
 
 # 推送目标 openid 从项目根 .env 读取（.env 已 gitignore，绝不写进仓库）。
@@ -66,12 +114,18 @@ fi
 if node scripts/qq_push.mjs "${push_args[@]}"; then
   if [ "$DRY_RUN" = "1" ]; then
     log "DRY_RUN：已打印内容，未实际发送"
+  elif [ "$brief_ok" = "1" ]; then
+    log "QQ 推送成功（要点 + $newest 附件）"
   else
-    log "QQ 推送成功"
+    log "QQ 推送成功（仅简报原文，要点未生成）"
   fi
 else
   log "QQ 推送失败（详见上方输出）"
   exit 1
 fi
+
+# brief_*.md / *.stderr.log 不在管线 cleanup 的匹配范围内，这里自行清理 7 天前的残留。
+# 刻意不叫 digest_*.md：否则会被本脚本的 `ls -t data/digest_*.md` 误认成简报。
+find data -maxdepth 1 \( -name 'brief_*.md' -o -name 'brief_*.stderr.log' \) -mtime +7 -delete 2>/dev/null || true
 
 log "=== 完成 ==="

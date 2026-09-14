@@ -6,6 +6,7 @@ import (
 	"log"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -71,6 +72,7 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNews
 			digestItems = append(digestItems, types.DigestItem{
 				MergedNewsItem: item,
 				FactParagraph:  fp,
+				DatePrefix:     itemDatePrefix(item),
 			})
 			catCount[cat]++
 			selectedLinks[item.Link] = true
@@ -165,11 +167,29 @@ func buildFactParagraph(item types.MergedNewsItem) string {
 }
 
 // formatPublishTime converts an RSS publish time to a readable Chinese date.
+// The year appears only when it differs from the current year: same-year items
+// stay terse, while a stale item (e.g. one resurfaced by a frozen feed) is
+// unambiguous instead of looking like it happened this year.
 // Returns empty string if parsing fails.
 func formatPublishTime(pub string) string {
+	t, ok := parsePublishTime(pub)
+	if !ok {
+		return ""
+	}
+	if t.Year() != currentTime().Year() {
+		return t.Format("2006年1月2日")
+	}
+	return t.Format("1月2日")
+}
+
+// parsePublishTime parses an RSS publish time. It tolerates the formats seen
+// across the configured feeds, plus a bare YYYY-MM-DD date as a last resort.
+// ok is false when the value is empty or unrecognized, which callers treat as
+// "unknown age" rather than "stale".
+func parsePublishTime(pub string) (time.Time, bool) {
 	pub = strings.TrimSpace(pub)
 	if pub == "" {
-		return ""
+		return time.Time{}, false
 	}
 	for _, format := range []string{
 		time.RFC1123,  // "Mon, 02 Jan 2006 15:04:05 MST"
@@ -179,16 +199,62 @@ func formatPublishTime(pub string) string {
 		"2006-01-02 15:04:05",
 	} {
 		if t, err := time.Parse(format, pub); err == nil {
-			return t.Format("1月2日")
+			return t, true
 		}
 	}
-	// If we can't parse, try to extract a date pattern
-	m := regexp.MustCompile(`(\d{4})[/-](\d{1,2})[/-](\d{1,2})`).FindStringSubmatch(pub)
-	if len(m) >= 4 {
-		return fmt.Sprintf("%s月%s日", m[2], m[3])
+	if m := datePatternRe.FindStringSubmatch(pub); len(m) >= 4 {
+		year, _ := strconv.Atoi(m[1])
+		month, _ := strconv.Atoi(m[2])
+		day, _ := strconv.Atoi(m[3])
+		return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC), true
 	}
-	return ""
+	return time.Time{}, false
 }
+
+// freshnessOf classifies an item's publish time against the freshness cutoff
+// and returns the parsed time (zero when unparseable, so callers can still
+// track a feed's newest item even when every item in it is stale).
+//
+// The purity matters: this is the single place the freshness rule is expressed,
+// so tests cover it directly instead of going through the network.
+func freshnessOf(pub string, cutoff time.Time) (freshness, time.Time) {
+	t, ok := parsePublishTime(pub)
+	if !ok {
+		return freshnessUndated, time.Time{}
+	}
+	if t.Before(cutoff) {
+		return freshnessStale, t
+	}
+	return freshnessFresh, t
+}
+
+// freshness classifies an item's publish time against the freshness cutoff.
+type freshness int
+
+const (
+	// freshnessFresh: published inside the window.
+	freshnessFresh freshness = iota
+	// freshnessStale: published before the window; the item is dropped.
+	freshnessStale
+	// freshnessUndated: no parseable publish time; the item is kept because
+	// dropping items of unknown age would silently lose feed coverage.
+	freshnessUndated
+)
+
+// itemDatePrefix returns the date-only prefix used in front of ItemSummary.
+// It deliberately excludes Region: the LLM summary usually already opens with
+// the region, so including it again would duplicate it.
+func itemDatePrefix(item types.MergedNewsItem) string {
+	pub := formatPublishTime(item.PublishedAt)
+	if pub == "" {
+		return ""
+	}
+	return pub + "，"
+}
+
+// datePatternRe matches a bare YYYY-MM-DD / YYYY/MM/DD date inside a
+// non-standard publish string.
+var datePatternRe = regexp.MustCompile(`(\d{4})[/-](\d{1,2})[/-](\d{1,2})`)
 
 // cleanText normalizes whitespace in text.
 var whitespaceRe = regexp.MustCompile(`\s+`)

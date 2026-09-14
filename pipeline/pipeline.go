@@ -41,6 +41,10 @@ type PipelineConfig struct {
 	ClusterThreshold float64 `yaml:"cluster_threshold"`
 	FileExpiryDays   int     `yaml:"file_expiry_days"`
 
+	// MaxNewsAgeDays 丢弃发布超过此天数的条目。停更的源会一直返回最后一批
+	// 旧闻，没有这道闸门它们会被反复标注、反复推送。
+	MaxNewsAgeDays int `yaml:"max_news_age_days"`
+
 	// 标注批次相关参数（一般无需调整，除非标注任务频繁失败）
 	TagBatchSize             int `yaml:"tag_batch_size"`
 	TagMaxConcurrentBatches  int `yaml:"tag_max_concurrent_batches"`
@@ -122,6 +126,21 @@ func (p *NewsPipeline) GetFileExpiryDays() int {
 		return types.DefaultFileExpiryDays
 	}
 	return p.Config.FileExpiryDays
+}
+
+func (p *NewsPipeline) GetMaxNewsAgeDays() int {
+	if p.Config.MaxNewsAgeDays <= 0 {
+		return types.DefaultMaxNewsAgeDays
+	}
+	return p.Config.MaxNewsAgeDays
+}
+
+// GetHistoryWindowDays returns how many per-day push_history files the dedup
+// step must load. It is deliberately one day wider than the news freshness
+// window: an item that is still young enough to be selected must also still be
+// visible in history, otherwise it falls out of dedup and gets pushed again.
+func (p *NewsPipeline) GetHistoryWindowDays() int {
+	return p.GetMaxNewsAgeDays() + 1
 }
 
 func (p *NewsPipeline) GetTagBatchSize() int {

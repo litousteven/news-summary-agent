@@ -19,6 +19,12 @@ cluster_threshold: 0.75
 # data/log 目录文件过期天数（超过此天数的 push_history/tagged_cache/embedding_cache/digest/log 文件将被清理）
 file_expiry_days: 2
 
+# 新闻时效窗口（天）：发布超过此天数的条目在抓取阶段直接丢弃。
+# 停更的 RSS 源会一直返回最后一批旧闻，没有这道闸门它们会被反复标注、
+# 反复推送。推送历史的去重窗口自动取该值 +1 天，保证「还够新、能被选中」
+# 的条目同时也「还在历史里、能被去重拦住」。
+max_news_age_days: 3
+
 # === 标注批次参数（一般无需调整，除非标注任务频繁失败） ===
 # 每批次发送给 LLM 的新闻条数
 tag_batch_size: 5

@@ -18,18 +18,34 @@ import (
 	"github.com/litousteven/news-summary-agent/pipeline"
 	"github.com/litousteven/news-summary-agent/pipeline/embedding"
 	"github.com/litousteven/news-summary-agent/pipeline/types"
+	"github.com/litousteven/news-summary-agent/site"
 )
 
 func main() {
+	mode := flag.String("mode", "pipeline", "运行模式: pipeline(跑管线) / site(生成静态站点) / serve(对外提供网页)")
 	slot := flag.String("slot", "manual", "推送档位: 00:00 / 12:00 / 18:00 / manual")
 	configDir := flag.String("config", "./config", "配置目录路径")
 	dataDir := flag.String("data", "./data", "数据目录路径 (运行时产出)")
+	publicDir := flag.String("public", "./public", "静态站点目录 (site / serve 模式)")
+	addr := flag.String("addr", "0.0.0.0:9000", "serve 模式监听地址")
+	baseURL := flag.String("base-url", "", "站点对外地址，用于 feed 绝对链接，如 https://news.example.com/")
+	siteToken := flag.String("site-token", "", "serve 模式访问口令（留空 = 完全公开）")
 	flag.Parse()
 
 	_ = godotenv.Load()
 
 	// Setup log: both stderr and daily-rotated file under log/
 	setupLogging()
+
+	// site / serve 不依赖 ChatModel，必须在创建模型之前分流：常驻的网页服务
+	// 不该要求 API key，也不该占用模型配额。
+	if *mode == "site" || *mode == "serve" {
+		runSiteMode(*mode, *dataDir, *publicDir, *addr, *baseURL, *siteToken)
+		return
+	}
+	if *mode != "pipeline" {
+		log.Fatalf("未知 -mode=%q（可选: pipeline / site / serve）", *mode)
+	}
 
 	ctx := context.Background()
 
@@ -201,11 +217,9 @@ func writeDigestMD(dataDir string, result *types.NewsSummaryResult) error {
 		// Prefer the LLM-generated Chinese summary (same rule as buildFinalMessage).
 		// FactParagraph is built before TranslateItems runs, so for en feeds it still
 		// contains the untranslated source text; ItemSummary is always Chinese.
-		summary := item.ItemSummary
-		if summary == "" {
-			summary = item.FactParagraph
-		}
-		b.WriteString(fmt.Sprintf("- %s\n", summary))
+		// RenderText restores the publish date, which ItemSummary drops while
+		// paraphrasing — without it a stale item is indistinguishable from today's.
+		b.WriteString(fmt.Sprintf("- %s\n", item.RenderText()))
 		if item.Link != "" {
 			b.WriteString(fmt.Sprintf("  [%s](%s)\n", item.Source, item.Link))
 		} else {
@@ -255,4 +269,28 @@ func setupLogging() {
 	log.SetOutput(multiWriter)
 	log.SetFlags(log.Ldate | log.Ltime)
 	log.Printf("日志文件: %s", logPath)
+}
+
+// runSiteMode handles -mode=site (generate once, then exit) and -mode=serve
+// (long-running static server). Both are kept out of the pipeline path so the
+// site can be regenerated or restarted without touching the news pipeline.
+func runSiteMode(mode, dataDir, publicDir, addr, baseURL, token string) {
+	switch mode {
+	case "site":
+		if err := site.Generate(site.Options{
+			DataDir:   dataDir,
+			PublicDir: publicDir,
+			BaseURL:   baseURL,
+		}); err != nil {
+			log.Fatalf("[Site] 生成失败: %v", err)
+		}
+	case "serve":
+		if err := site.Serve(site.ServerOptions{
+			Addr:      addr,
+			PublicDir: publicDir,
+			Token:     token,
+		}); err != nil {
+			log.Fatalf("[Site] 服务退出: %v", err)
+		}
+	}
 }

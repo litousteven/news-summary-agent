@@ -281,13 +281,20 @@ func (p *NewsPipeline) llmVerifyDuplicatesMerged(ctx context.Context, items []ty
 	return results, nil
 }
 
-// loadPushHistory reads push history from today's and yesterday's per-day files.
+// loadPushHistory reads push history from the per-day files covering the
+// configured window.
+//
+// The window must be at least as wide as the news freshness window in FetchRSS.
+// When it was hardcoded to two days, an item pushed on day D stayed eligible
+// for selection on day D+2 while its history record had already fallen out of
+// the window, so dedup saw it as new and pushed it again — the same article
+// could resurface every two days indefinitely.
 func (p *NewsPipeline) loadPushHistory() ([]types.PushHistoryRecord, error) {
 	now := time.Now()
 	var records []types.PushHistoryRecord
 
-	for _, t := range []time.Time{now, now.Add(-24 * time.Hour)} {
-		path := p.DataDir + "/push_history_" + t.Format("20060102") + ".jsonl"
+	for i := 0; i < p.GetHistoryWindowDays(); i++ {
+		path := p.DataDir + "/push_history_" + now.AddDate(0, 0, -i).Format("20060102") + ".jsonl"
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {

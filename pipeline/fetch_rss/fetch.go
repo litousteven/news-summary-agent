@@ -40,8 +40,12 @@ var DefaultFeeds = []FeedSource{
 	{Name: "BBC", URL: "https://feeds.bbci.co.uk/news/world/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
 	{Name: "NPR", URL: "https://feeds.npr.org/1004/rss.xml", Lang: "en", UseProxy: true, Enabled: true},
 	{Name: "NYT", URL: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml", Lang: "en", UseProxy: true, Enabled: true},
-	{Name: "联合早报", URL: "https://plink.anyfeeder.com/zaobao/realtime/world", Lang: "zh", Enabled: true},
-	{Name: "联合早报-中国", URL: "https://plink.anyfeeder.com/zaobao/realtime/china", Lang: "zh", Enabled: true},
+	// 中新网-中国 / 中新网-财经 用于替代已停更的 zaobao 代理源（见 feeds.yaml 注释）
+	{Name: "中新网-中国", URL: "https://www.chinanews.com.cn/rss/china.xml", Lang: "zh", Enabled: true},
+	{Name: "中新网-财经", URL: "https://www.chinanews.com.cn/rss/finance.xml", Lang: "zh", Enabled: true},
+	// 联合早报两个源已停用：第三方代理 plink.anyfeeder.com 自 2026-07-29 起不再更新
+	{Name: "联合早报", URL: "https://plink.anyfeeder.com/zaobao/realtime/world", Lang: "zh"},
+	{Name: "联合早报-中国", URL: "https://plink.anyfeeder.com/zaobao/realtime/china", Lang: "zh"},
 	{Name: "香港电台", URL: "https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml", Lang: "zh"},
 	{Name: "CNN", URL: "http://rss.cnn.com/rss/edition.rss", Lang: "en"},
 	{Name: "Washington Post", URL: "https://feeds.washingtonpost.com/rss/world", Lang: "en", UseProxy: true},

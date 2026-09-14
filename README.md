@@ -48,7 +48,13 @@ max_digest_items: 10      # 简报最大入选条目数
 max_per_category: 3       # 每个分类最大条目数
 cluster_threshold: 0.75   # 语义去重相似度阈值 (0.0~1.0)
 file_expiry_days: 2       # data/ 目录文件过期天数
+max_news_age_days: 3      # 新闻时效窗口：发布超过此天数的条目直接丢弃
 ```
+
+`max_news_age_days` 是防止**停更源**污染简报的闸门：一个 RSS 源停止更新后仍会持续返回
+200 和它的最后一批条目，没有这道过滤就会被当成新内容反复标注、反复推送。发布时间的解析
+失败时条目会被放行（年龄未知不等于过期），但会在日志里计数。推送历史的去重窗口自动取该值
++1 天。
 
 **3. RSS 源** — 编辑 `config/feeds.yaml`
 
@@ -67,6 +73,12 @@ file_expiry_days: 2       # data/ 目录文件过期天数
 ```
 
 设置 `enabled: false` 可临时关闭某个源，无需删除配置。
+
+> **停更源排查**：RSS 源停止更新后仍会返回 200 和旧的条目列表，从抓取层面看不出来。
+> 每次运行可在日志里看每个源的健康状况：
+> `[FetchRSS] source=XX count=N 跳过过期=K 无日期=M`，以及源疑似停更时的
+> `⚠ 源可能已停更: source=XX 最新条目为 N 天前`。2026-09 曾有两个 zaobao 代理源
+> 静默停更 47 天，确认后已停用（原因见 `config/feeds.yaml` 注释）。
 
 ### 运行
 
@@ -96,6 +108,7 @@ go run . -config ./config -data ./data
 | 文件 | 说明 |
 |------|------|
 | `data/digest_YYYYMMDD_HHMMSS.md` | 本次简报全文 |
+| `data/brief_YYYYMMDD_HHMMSS.md` | 推送用《要点》（仅走推送流程时产出，见下节） |
 | `data/push_history_YYYYMMDD.jsonl` | 推送历史（按天，用于去重） |
 | `data/tagged_cache_YYYYMMDD.jsonl` | 标注缓存（按天，避免重复标注） |
 
@@ -221,7 +234,7 @@ END → *NewsSummaryResult
 
 #### MergeHistory
 
-加载当天和前一天的推送历史，四级去重：
+加载最近 `max_news_age_days + 1` 天的推送历史（`push_history_YYYYMMDD.jsonl`），四级去重：
 
 | 优先级 | 策略 | 说明 |
 |--------|------|------|
@@ -230,11 +243,15 @@ END → *NewsSummaryResult
 | 3 | 向量筛查 + LLM 核查 | embedding 相似度 >= 阈值时，由 LLM 判断是否同一事件 |
 | 4 | 回退 | LLM 不可用时信任向量相似度 |
 
-已推送但 interest_score >= 8 的新闻仍会以"追踪更新"形式入选。
+命中任一级的条目标记为 `SeenBefore=true`，**不进入简报**——代码中没有"追踪更新"通道。
+
+> **去重窗口必须 ≥ 时效窗口。** 窗口如果比 `max_news_age_days` 窄，一条推送满 N 天的新闻会
+> 出现「仍然够新、能被选中」但「已经掉出历史、去重看不见」的状态，于是被当成新条目重复推送。
+> 历史窗口固定为时效窗口 +1 天正是为了避免这种错位。
 
 #### BuildDigest
 
-对 `ShouldPush=true` 的新闻进行编排：
+对未被历史去重命中的候选新闻进行编排：
 
 1. 按 link/display_title 精确去重，保留最优源
 2. 同分类内做向量聚类去重（union-find），保留最优源
@@ -243,7 +260,7 @@ END → *NewsSummaryResult
 
 #### RecordHistory
 
-将本次入选的新闻追加到 `push_history_YYYYMMDD.jsonl`，记录 push_time、display_title、category、link、fact_summary、embedding 等字段，供下次去重使用。按天切割文件，只加载当天+前一天。
+将本次入选的新闻追加到 `push_history_YYYYMMDD.jsonl`，记录 push_time、display_title、category、link、fact_summary、embedding 等字段，供下次去重使用。按天切割文件，加载窗口见 MergeHistory。
 
 #### UpdateTaggingGuide
 
@@ -272,6 +289,144 @@ PushHistoryRecord     // push_time, display_title, category, link, fact_summary,
 - `digest_*.md`
 
 非匹配文件不会被删除。清理操作有详细日志，错误仅记录不中断运行。
+
+---
+
+## 定时运行与 QQ 推送
+
+`scripts/news_push_cron.sh` 把「跑管线 → 生成要点 → 推 QQ」串成一条链路，
+由 launchd (`com.litou.news-summary-push`) 在 00:00 / 06:00 / 12:00 / 18:00 调用。
+
+推送内容分两条：**先发《要点》文本，再把简报原文 `.md` 作为文件附件发出**。
+
+```
+news_push_cron.sh
+  ├─ ./news-summary-agent -slot manual       # 阶段一~四：产出 data/digest_*.md
+  ├─ scripts/news_brief.sh <digest> <brief>  # dsh --profile headless 压缩成要点
+  └─ scripts/qq_push.mjs <brief> --file <digest>
+         ├─ 要点文本 → msg_type=0（超 900 字自动分块）
+         └─ 原文附件 → 富媒体上传拿 file_info → msg_type=7
+```
+
+### scripts/news_brief.sh
+
+调用 `dsh --profile headless "<task>"`（一次性任务模式：不监听端口，最终答案写 stdout 后退出）
+把 digest 压成 3-5 条要点 + 一句话主线，纯文本、不带 markdown 表格。
+
+要点生成**失败或超时不影响新闻推送**：脚本会回退为只推简报原文。
+
+### 手动调试
+
+```bash
+# 全链路跑一遍（管线 + 要点 + 推送，约 3-6 分钟）
+bash scripts/news_push_cron.sh
+
+# 跳过管线，用现有最新 digest 验证「要点 + 附件」推送
+SKIP_PIPELINE=1 bash scripts/news_push_cron.sh
+
+# 只打印不发送
+SKIP_PIPELINE=1 DRY_RUN=1 bash scripts/news_push_cron.sh
+
+# 跳过要点生成，回退到只推原文
+SKIP_PIPELINE=1 GENERATE_BRIEF=0 bash scripts/news_push_cron.sh
+
+# 单独验证要点生成
+bash scripts/news_brief.sh data/digest_20260913_131600.md /tmp/brief.md && cat /tmp/brief.md
+```
+
+### 相关环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `SKIP_PIPELINE` | `0` | `1` = 不跑 Go 管线，直接推最新 digest |
+| `DRY_RUN` | `0` | `1` = 只打印，不发 QQ |
+| `GENERATE_BRIEF` | `1` | `0` = 跳过要点生成，只推原文 |
+| `BRIEF_TIMEOUT_SECONDS` | `300` | 单次要点生成超时（`news_brief.sh`） |
+| `BRIEF_PROFILE` | `headless` | 生成要点用的 dsh profile |
+| `DSH_CHECKOUT` | `/Users/litou/DSH/deepseek-harness` | dsh 源码 checkout |
+| `QQ_TARGET_OPENID` | 项目根 `.env` | 推送目标 openid，不写入仓库 |
+
+### 注意
+
+`dsh --profile headless` 必须在普通终端或 launchd 下运行。从另一个 agent 会话内部嵌套调用会被
+文件沙箱挡在 `~/.dsh/profiles/<profile>/` 的写入上（`EPERM`）。
+
+---
+
+## 新闻网页
+
+把 `data/digest_*.md` 渲染成一个静态新闻站点，由一个极小的 HTTP 服务对外提供。
+
+```
+news_push_cron.sh
+  └─ ./news-summary-agent -mode site -data ./data -public ./public
+        ├─ public/index.html          最新一期（完整内容）
+        ├─ public/d/<slug>.html       每期一个页面（历史归档）
+        ├─ public/style.css
+        └─ public/feed.xml            Atom 订阅
+
+./news-summary-agent -mode serve -addr 0.0.0.0:9000 -public ./public
+```
+
+### 三个运行模式
+
+| `-mode` | 作用 | 生命周期 |
+|---------|------|---------|
+| `pipeline`（默认） | 跑新闻管线 | 一次性 |
+| `site` | 从 `data/` 渲染静态站点到 `public/` | 一次性，由 cron 调用 |
+| `serve` | 提供 `public/` 的 HTTP 服务 | 常驻（launchd） |
+
+`site` / `serve` 在创建 ChatModel **之前**分流，所以两者都不需要任何 API key。
+
+### 归档为什么能留住
+
+管线会按 `file_expiry_days` 清理 `data/digest_*.md`，但归档列表是从**已生成的
+`public/d/*.html`** 反推的，页面一旦生成就不再删除。因此网页的历史长度不受
+`file_expiry_days` 限制。
+
+### 手动使用
+
+```bash
+# 生成站点（不推送、不联网）
+./news-summary-agent -mode site -data ./data -public ./public
+
+# 本地起服务（前台）
+./news-summary-agent -mode serve -addr 127.0.0.1:9000 -public ./public
+
+# 用 launchd 常驻（在普通终端运行，DSH 沙箱内写不了 ~/Library/LaunchAgents）
+./scripts/install-site-launchd.sh
+
+# 验证
+curl -s http://127.0.0.1:9000/healthz
+```
+
+### 站点相关配置
+
+放在项目根 `.env`（已 gitignore）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `NEWS_SITE_ADDR` | `0.0.0.0:9000` | 监听地址 |
+| `NEWS_SITE_TOKEN` | 空 | 访问口令；空 = 完全公开。口令可用 `?t=xxx` 或 `Authorization: Bearer xxx` |
+| `NEWS_SITE_BASE_URL` | 空 | 对外地址，如 `https://news.example.com/`，用于 RSS 的绝对链接 |
+
+命令行对应 `-addr` / `-site-token` / `-base-url`；cron 里可用 `GENERATE_SITE=0` 跳过网页重建。
+
+### 暴露面（对公网开放前请确认）
+
+服务只把 `public/` 当作根目录，且：
+
+- 只接受 `GET` / `HEAD`，其余方法一律 `405`
+- **永不列目录**：目录下没有 `index.html` 就返回 `404`（`/d/` 也不可遍历）
+- 拒绝任何以 `.` 开头的路径段（`.env`、`.git`、`.DS_Store` 都取不到）
+- 路径以 `path.Clean("/"+p)` 消毒，`/../../etc/passwd` 与 `%2e%2e` 编码穿越均返回 `404`
+- 响应头带 `X-Content-Type-Options` / `Referrer-Policy` / `X-Frame-Options` / CSP
+- 所有内容经 `html/template` 转义，新闻正文与 LLM 输出无法注入标记
+- 空口令时页面完全公开；需要限制访问就设 `NEWS_SITE_TOKEN`
+
+> **仓库、`data/`、`.env`、`config/` 都不在 `public/` 内**，服务端也无法跳出该目录。
+> 但端口一旦暴露到公网，任何人都能读到这些新闻页面——内容本身是公开新闻，
+> 如果简报里出现你不希望公开的内容，请改用 `NEWS_SITE_TOKEN`。
 
 ---
 

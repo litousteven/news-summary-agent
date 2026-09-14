@@ -1,5 +1,7 @@
 package types
 
+import "strings"
+
 type NewsSummaryRequest struct {
 	Slot string // "00:00" / "12:00" / "18:00"
 }
@@ -69,6 +71,42 @@ type DigestItem struct {
 	MergedNewsItem
 	FactParagraph string `json:"fact_paragraph"`
 	ItemSummary   string `json:"item_summary"`
+	// DatePrefix is the publish-date prefix ("7月28日，"), computed once in
+	// BuildDigest. ItemSummary is LLM-generated from FactParagraph and drops the
+	// date while paraphrasing, so renderers restore it from here instead of
+	// relying on the summary to carry it.
+	DatePrefix string `json:"date_prefix,omitempty"`
+}
+
+// RenderText returns the human-facing text for this item, always preserving the
+// publish date. FactParagraph already embeds the "{region}{date}，" prefix;
+// ItemSummary usually does not, so DatePrefix is prepended for it — unless the
+// LLM already opened the summary with the same date, which would duplicate it.
+func (d DigestItem) RenderText() string {
+	if d.ItemSummary == "" {
+		return d.FactParagraph
+	}
+	if d.DatePrefix == "" || startsWithDate(d.ItemSummary, d.DatePrefix) {
+		return d.ItemSummary
+	}
+	return d.DatePrefix + d.ItemSummary
+}
+
+// startsWithDate reports whether text already begins with the date carried by
+// datePrefix (which ends in "，"). The character following the date must not be
+// a digit: a plain strings.HasPrefix would treat "7月2日" as a prefix of
+// "7月28日…" and wrongly skip the real date.
+func startsWithDate(text, datePrefix string) bool {
+	date := strings.TrimSuffix(datePrefix, "，")
+	if !strings.HasPrefix(text, date) {
+		return false
+	}
+	rest := text[len(date):]
+	if rest == "" {
+		return true
+	}
+	first := []rune(rest)[0]
+	return first < '0' || first > '9'
 }
 
 // DigestStats contains pipeline statistics.
@@ -176,6 +214,10 @@ const (
 	DefaultMaxPerCategory   = 3
 	DefaultClusterThreshold = 0.75
 	DefaultFileExpiryDays   = 2
+	// DefaultMaxNewsAgeDays bounds how old a fetched item may be. Feeds that
+	// stop updating keep serving their last batch, so without this bound the
+	// pipeline re-tags and re-pushes the same dead batch indefinitely.
+	DefaultMaxNewsAgeDays = 3
 
 	// 标注批次相关默认值（一般无需调整）
 	DefaultTagBatchSize             = 15

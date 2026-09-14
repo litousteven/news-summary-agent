@@ -33,19 +33,40 @@
   use_proxy: true
   enabled: true
 
+# ⚠ 已停用（2026-09-14）：下面两个 zaobao 源的第三方代理 plink.anyfeeder.com
+# 自 2026-07-29 起停止更新，实测最新 pubDate 冻结在 7月29日，仍返回 200 与
+# 15 条旧闻。启用期间它们每天被当作新内容抓取，污染了简报数周。max_news_age_days
+# 现在会拦下这类条目，但源头仍然是有问题的；找到可用替代源前保持关闭。
+# 官方路径已试过均不可用：zaobao.com/realtime/china/rss.xml (404)、
+# zaobao.com/rss/realtime/china (200 但无 item)。
 - name: 联合早报
   url: https://plink.anyfeeder.com/zaobao/realtime/world
   lang: zh
   use_proxy: false
-  enabled: true
+  enabled: false
 
 - name: 联合早报-中国
   url: https://plink.anyfeeder.com/zaobao/realtime/china
   lang: zh
   use_proxy: false
-  enabled: true
+  enabled: false
 
 # ===== 候选源（默认关闭，按需启用） =====
+
+# 以下两个中新网源于 2026-09-14 启用，用于填补停用的 zaobao 源留下的中文
+# 覆盖缺口（尤其是财经/A股）。实测当日活跃：china.xml 与 finance.xml 各 30 条，
+# 最新 pubDate 均为当天。如不想要，把 enabled 改回 false 即可。
+- name: 中新网-中国
+  url: https://www.chinanews.com.cn/rss/china.xml
+  lang: zh
+  use_proxy: false
+  enabled: true
+
+- name: 中新网-财经
+  url: https://www.chinanews.com.cn/rss/finance.xml
+  lang: zh
+  use_proxy: false
+  enabled: true
 
 - name: 香港电台
   url: https://rthk.hk/rthk/news/rss/c_expressnews_cinternational.xml
