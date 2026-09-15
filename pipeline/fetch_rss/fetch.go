@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -164,4 +165,73 @@ func CleanHTML(s string) string {
 	s = strings.TrimSpace(s)
 	s = whitespaceRe2.ReplaceAllString(s, " ")
 	return s
+}
+
+// HTTP 状态码提取，用于区分「永久失败」与「可重试的瞬时失败」。
+var httpStatusRe = regexp.MustCompile(`status (\d{3})`)
+
+// isPermanentFeedError 判断是否为不该重试的错误。
+// 4xx 是源本身的问题（地址失效、被拒），重试没有意义；其余（连接重置、
+// 超时、5xx、代理抖动）都值得重试。
+func isPermanentFeedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := httpStatusRe.FindStringSubmatch(err.Error())
+	if len(m) < 2 {
+		return false
+	}
+	code, convErr := strconv.Atoi(m[1])
+	if convErr != nil {
+		return false
+	}
+	return code >= 400 && code < 500
+}
+
+// FetchFeedWithRetry 抓取一个源，瞬时失败时按线性退避重试。
+//
+// 抓取原本是一次性的：代理抖一下（connection reset）就整轮丢掉一个源，
+// 而这一天剩下的几轮里该源的内容可能已经过期。标注阶段一直有重试，抓取阶段
+// 却漏了。
+func FetchFeedWithRetry(
+	ctx context.Context,
+	src FeedSource,
+	proxyAddr string,
+	maxRetries int,
+	baseDelay time.Duration,
+) ([]*gofeed.Item, error) {
+	attempts := maxRetries + 1
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		items, err := FetchFeed(ctx, src, proxyAddr)
+		if err == nil {
+			if attempt > 1 {
+				log.Printf("[FetchRSS] source=%s 第 %d 次尝试成功（前 %d 次失败）", src.Name, attempt, attempt-1)
+			}
+			return items, nil
+		}
+		lastErr = err
+
+		if isPermanentFeedError(err) {
+			log.Printf("[FetchRSS] source=%s 永久失败，不重试: %v", src.Name, err)
+			return nil, err
+		}
+		if attempt == attempts {
+			break
+		}
+
+		delay := time.Duration(attempt) * baseDelay
+		log.Printf("[FetchRSS] source=%s 第 %d/%d 次失败: %v，%v 后重试",
+			src.Name, attempt, attempts, err, delay)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+	return nil, fmt.Errorf("%w（已尝试 %d 次）", lastErr, attempts)
 }

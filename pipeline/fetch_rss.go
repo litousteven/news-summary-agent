@@ -32,9 +32,10 @@ func (p *NewsPipeline) fetchRSS(ctx context.Context, req *types.NewsSummaryReque
 	feeds := fetchrss.LoadFeeds(p.ConfigDir)
 
 	for _, feed := range feeds {
-		fetched, err := fetchrss.FetchFeed(ctx, feed, p.ProxyAddr)
+		fetched, err := fetchrss.FetchFeedWithRetry(ctx, feed, p.ProxyAddr,
+			p.GetFeedMaxRetries(), time.Duration(p.GetFeedRetryBaseDelaySeconds())*time.Second)
 		if err != nil {
-			log.Printf("[FetchRSS] feed=%s err=%v", feed.Name, err)
+			log.Printf("[FetchRSS] feed=%s 最终失败: %v", feed.Name, err)
 			continue
 		}
 		var staleSkipped, undated int

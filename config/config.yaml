@@ -25,6 +25,12 @@ file_expiry_days: 2
 # 的条目同时也「还在历史里、能被去重拦住」。
 max_news_age_days: 3
 
+# RSS 抓取重试：代理抖动/超时等瞬时失败时重试，避免整轮丢掉一个源。
+# 线性退避 = 第 n 次重试等待 n * feed_retry_base_delay_seconds 秒。
+# 4xx 视为永久失败（地址失效/被拒），不重试。
+feed_max_retries: 2
+feed_retry_base_delay_seconds: 3
+
 # === 标注批次参数（一般无需调整，除非标注任务频繁失败） ===
 # 每批次发送给 LLM 的新闻条数
 tag_batch_size: 5

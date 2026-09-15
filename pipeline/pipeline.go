@@ -45,6 +45,10 @@ type PipelineConfig struct {
 	// 旧闻，没有这道闸门它们会被反复标注、反复推送。
 	MaxNewsAgeDays int `yaml:"max_news_age_days"`
 
+	// RSS 抓取重试（代理抖动、超时等瞬时失败）
+	FeedMaxRetries            int `yaml:"feed_max_retries"`
+	FeedRetryBaseDelaySeconds int `yaml:"feed_retry_base_delay_seconds"`
+
 	// 标注批次相关参数（一般无需调整，除非标注任务频繁失败）
 	TagBatchSize             int `yaml:"tag_batch_size"`
 	TagMaxConcurrentBatches  int `yaml:"tag_max_concurrent_batches"`
@@ -141,6 +145,20 @@ func (p *NewsPipeline) GetMaxNewsAgeDays() int {
 // visible in history, otherwise it falls out of dedup and gets pushed again.
 func (p *NewsPipeline) GetHistoryWindowDays() int {
 	return p.GetMaxNewsAgeDays() + 1
+}
+
+func (p *NewsPipeline) GetFeedMaxRetries() int {
+	if p.Config.FeedMaxRetries <= 0 {
+		return types.DefaultFeedMaxRetries
+	}
+	return p.Config.FeedMaxRetries
+}
+
+func (p *NewsPipeline) GetFeedRetryBaseDelaySeconds() int {
+	if p.Config.FeedRetryBaseDelaySeconds <= 0 {
+		return types.DefaultFeedRetryBaseDelaySeconds
+	}
+	return p.Config.FeedRetryBaseDelaySeconds
 }
 
 func (p *NewsPipeline) GetTagBatchSize() int {

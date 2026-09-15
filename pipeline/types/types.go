@@ -219,6 +219,11 @@ const (
 	// pipeline re-tags and re-pushes the same dead batch indefinitely.
 	DefaultMaxNewsAgeDays = 3
 
+	// RSS 抓取重试：瞬时失败（代理抖动、超时、5xx）重试次数与线性退避基数。
+	// 抓取原本一次性，代理 reset 一次就整轮丢掉一个源。
+	DefaultFeedMaxRetries            = 2
+	DefaultFeedRetryBaseDelaySeconds = 3
+
 	// 标注批次相关默认值（一般无需调整）
 	DefaultTagBatchSize             = 15
 	DefaultTagMaxConcurrentBatches  = 2
