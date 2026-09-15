@@ -77,9 +77,9 @@ func MergeExactDuplicates(items []types.MergedNewsItem, clusters map[int][]int) 
 
 		best := indices[0]
 		for _, idx := range indices[1:] {
-			if fetchrss.SourceRank[items[idx].Source] < fetchrss.SourceRank[items[best].Source] {
+			if fetchrss.RankOf(items[idx].Source) < fetchrss.RankOf(items[best].Source) {
 				best = idx
-			} else if fetchrss.SourceRank[items[idx].Source] == fetchrss.SourceRank[items[best].Source] && items[idx].InterestScore > items[best].InterestScore {
+			} else if fetchrss.RankOf(items[idx].Source) == fetchrss.RankOf(items[best].Source) && items[idx].InterestScore > items[best].InterestScore {
 				best = idx
 			}
 		}

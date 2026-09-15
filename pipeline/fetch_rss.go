@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"html"
 	"log"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/compose"
@@ -30,6 +32,27 @@ func (p *NewsPipeline) fetchRSS(ctx context.Context, req *types.NewsSummaryReque
 		AddDate(0, 0, -maxAgeDays)
 
 	feeds := fetchrss.LoadFeeds(p.ConfigDir)
+
+	// 按质量档位决定抓取顺序。顺序是有意义的：总条目上限是「先到先得」，
+	// 排在后面的源会被前面的吃光预算。以前这个优先级靠 feeds.yaml 的行序
+	// 隐式表达，调整文件排版就会意外改变优先级；现在它是显式规则。
+	// 稳定排序，同档位保持文件顺序。
+	sort.SliceStable(feeds, func(i, j int) bool {
+		return fetchrss.RankOf(feeds[i].Name) < fetchrss.RankOf(feeds[j].Name)
+	})
+
+	// 未登记档位的源会被当作 UnknownSourceRank，排在已评级源之后。列出它们，
+	// 否则新增一个源后"为什么它总是不入选"会很难排查。
+	var unranked []string
+	for _, feed := range feeds {
+		if _, ok := fetchrss.SourceRank[feed.Name]; !ok {
+			unranked = append(unranked, feed.Name)
+		}
+	}
+	if len(unranked) > 0 {
+		log.Printf("[FetchRSS] ⚠ %d 个源未配置质量档位，将排在已评级源之后（档位 %d）: %s",
+			len(unranked), fetchrss.UnknownSourceRank, strings.Join(unranked, ", "))
+	}
 
 	for _, feed := range feeds {
 		fetched, err := fetchrss.FetchFeedWithRetry(ctx, feed, p.ProxyAddr,

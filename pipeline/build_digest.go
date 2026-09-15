@@ -56,8 +56,8 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNews
 			if si != sj {
 				return si > sj
 			}
-			ri := fetchrss.SourceRank[byCategory[cat][i].Source]
-			rj := fetchrss.SourceRank[byCategory[cat][j].Source]
+			ri := fetchrss.RankOf(byCategory[cat][i].Source)
+			rj := fetchrss.RankOf(byCategory[cat][j].Source)
 			return ri < rj
 		})
 	}

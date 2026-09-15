@@ -28,12 +28,44 @@ type FeedSource struct {
 	Enabled  bool   `yaml:"enabled" json:"enabled"`
 }
 
+// SourceRank 是新闻源的质量档位，**数值越小越优先**。
+//
+// 这张表必须显式覆盖每一个在用的源。原因：未收录的源会取 Go map 的零值 0，
+// 而 0 恰好是**最优档**——于是任何漏配的源都会在去重与编排里被当成比 NYT
+// （rank 3）更好的来源。2026-09 之前只有 5 个源被收录，剩下的 17 个实际上
+// 都在"顶配"档，导致「同一事件保留更高质来源」这条规则大部分时候是反的。
+//
+// 档位来源：0–11 沿用 feeds.yaml 里已经表达的偏好顺序；其余（从未表达过偏好、
+// 或已确认停更的）统一用 UnknownSourceRank，等有明确判断时再调。
 var SourceRank = map[string]int{
-	"中新网":        0,
-	"BBC":        1,
-	"NPR":        2,
-	"NYT":        3,
-	"Al Jazeera": 4,
+	// —— 在用的源，按 feeds.yaml 顺序 ——
+	"中新网":             0,
+	"BBC":             1,
+	"NPR":             2,
+	"NYT":             3,
+	"Al Jazeera":      4, // 已配档位但当前未启用
+	"中新网-中国":          5,
+	"中新网-财经":          6,
+	"ABC News":        7,
+	"FOX News":        8,
+	"Financial Times": 9,
+	"France24":        10,
+	"Japan Times":     11,
+}
+
+// UnknownSourceRank 是未在 SourceRank 中登记时的档位。
+//
+// 刻意不等于零值：零值是最优档，会让新加的源静默插到所有已评级源前面。
+// 取一个偏后但非末尾的值，含义是"尚未评估"——会被采用，但排在已确认质量的
+// 源之后。新来源稳定产出后再给它一个明确的档位。
+const UnknownSourceRank = 20
+
+// RankOf 返回某个源的质量档位，越小越优先。未登记的源得到 UnknownSourceRank。
+func RankOf(source string) int {
+	if rank, ok := SourceRank[source]; ok {
+		return rank
+	}
+	return UnknownSourceRank
 }
 
 var DefaultFeeds = []FeedSource{

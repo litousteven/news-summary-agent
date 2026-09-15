@@ -137,7 +137,7 @@ func TestMergeExactDuplicates_CombinesLinks(t *testing.T) {
 			TaggedNewsItem: types.TaggedNewsItem{
 				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/a",
-					Source: "央视新闻",
+					Source: "BBC",
 				},
 				DisplayTitle: "标题X",
 			},
@@ -146,7 +146,7 @@ func TestMergeExactDuplicates_CombinesLinks(t *testing.T) {
 			TaggedNewsItem: types.TaggedNewsItem{
 				RawNewsItem: types.RawNewsItem{
 					Link:   "https://example.com/b",
-					Source: "BBC",
+					Source: "NYT",
 				},
 				DisplayTitle: "标题X", // same title
 			},
@@ -157,11 +157,40 @@ func TestMergeExactDuplicates_CombinesLinks(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 merged item, got %d", len(result))
 	}
-	if result[0].Source != "央视新闻" {
-		t.Errorf("expected source 央视新闻, got %s", result[0].Source)
+	// 保留档位更高的一方：BBC(1) 优于 NYT(3)
+	if result[0].Source != "BBC" {
+		t.Errorf("expected source BBC（档位更高）, got %s", result[0].Source)
 	}
 	if len(result[0].Links) != 2 {
 		t.Errorf("expected 2 links, got %d: %v", len(result[0].Links), result[0].Links)
+	}
+}
+
+// 未评级源（UnknownSourceRank）不得压过已评级源。
+//
+// 这条曾长期反向：未登记的源取 map 零值 0，而 0 是最优档，于是未评级源能赢过
+// NYT(3) 甚至任何已评级源。本用例锁住修复后的行为。
+func TestMergeExactDuplicates_UnrankedSourceLosesToRanked(t *testing.T) {
+	items := []types.MergedNewsItem{
+		{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:  types.RawNewsItem{Link: "https://example.com/a", Source: "某个从未评级的新源"},
+				DisplayTitle: "标题Y",
+			},
+		},
+		{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:  types.RawNewsItem{Link: "https://example.com/b", Source: "NYT"},
+				DisplayTitle: "标题Y",
+			},
+		},
+	}
+	result := MergeExactDuplicates(items, DedupCluster(items))
+	if len(result) != 1 {
+		t.Fatalf("expected 1 merged item, got %d", len(result))
+	}
+	if result[0].Source != "NYT" {
+		t.Errorf("未评级源不应胜过已评级源，实际保留了 %q", result[0].Source)
 	}
 }
 
