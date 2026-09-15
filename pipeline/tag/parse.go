@@ -196,12 +196,19 @@ func ParseTaggedItems(msgContent string, rawItems []types.RawNewsItem, validCate
 
 	rawByID := make(map[string]types.RawNewsItem, len(rawItems))
 	rawByTitle := make(map[string]types.RawNewsItem, len(rawItems))
+	// 模型偶尔会把 ID 的「来源-」前缀丢掉（来源名是中文时尤其常见），
+	// 留下裸哈希。用后缀建一张表，先把这类结果救回来。
+	rawByIDHash := make(map[string]types.RawNewsItem, len(rawItems))
 	for _, raw := range rawItems {
 		rawByID[raw.ID] = raw
 		rawByTitle[raw.Title] = raw
+		if hash := idHash(raw.ID); hash != "" {
+			rawByIDHash[hash] = raw
+		}
 	}
 
 	tagged := make([]types.TaggedNewsItem, 0, len(tagItems))
+	var orphaned int
 	for _, r := range tagItems {
 		item := types.TaggedNewsItem{
 			RawNewsItem: types.RawNewsItem{
@@ -217,12 +224,27 @@ func ParseTaggedItems(msgContent string, rawItems []types.RawNewsItem, validCate
 			WhySelected:   r.WhySelected,
 		}
 
+		// 逐级尝试把标注结果绑回一条真实抓取到的原始条目。
+		matched := false
 		if raw, ok := rawByID[r.ID]; ok {
-			item.RawNewsItem = raw
+			item.RawNewsItem, matched = raw, true
 		} else if raw, ok := rawByTitle[r.DisplayTitle]; ok {
-			item.RawNewsItem = raw
+			item.RawNewsItem, matched = raw, true
 		} else if raw, ok := rawByTitle[r.ID]; ok {
-			item.RawNewsItem = raw
+			item.RawNewsItem, matched = raw, true
+		} else if raw, ok := rawByIDHash[idHash(r.ID)]; ok {
+			item.RawNewsItem, matched = raw, true
+			log.Printf("[ParseTaggedItems] ID 前缀缺失，按哈希后缀匹配成功: id=%q → 原始条目 source=%s", r.ID, raw.Source)
+		}
+
+		// 绑定不上就丢弃。原实现保留这类结果，会产出一条 source/title/link
+		// 全空、只有模型生成内容的条目，并一路推进简报——等于凭空发布一条
+		// 无法回溯到任何原文的「新闻」。2026-09-14 与 09-15 各发生过一次。
+		if !matched {
+			orphaned++
+			log.Printf("[ParseTaggedItems] ⚠ 丢弃无法回溯到原始条目的标注结果: id=%q display_title=%q",
+				r.ID, r.DisplayTitle)
+			continue
 		}
 
 		if item.DisplayTitle == "" {
@@ -232,7 +254,20 @@ func ParseTaggedItems(msgContent string, rawItems []types.RawNewsItem, validCate
 		tagged = append(tagged, item)
 	}
 
+	if orphaned > 0 {
+		log.Printf("[ParseTaggedItems] 本轮丢弃 %d 条无来源标注结果（原始 %d 条，返回 %d 条）",
+			orphaned, len(rawItems), len(tagItems))
+	}
+
 	return tagged, nil
+}
+
+// idHash 取 "来源-哈希" 形式 ID 的哈希部分；没有分隔符时原样返回。
+func idHash(id string) string {
+	if i := strings.LastIndex(id, "-"); i >= 0 && i+1 < len(id) {
+		return id[i+1:]
+	}
+	return id
 }
 
 func ParseTagResultFromMessage(msgContent string, rawItems []types.RawNewsItem) ([]types.TaggedNewsItem, error) {

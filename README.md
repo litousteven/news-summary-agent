@@ -232,6 +232,13 @@ END → *NewsSummaryResult
 
 标注结果按天缓存到 `tagged_cache_YYYYMMDD.jsonl`，下次运行时相同链接的新闻直接命中缓存，避免重复标注。
 
+> **不变量：简报里每一条都必须能回溯到一条真实抓取到的新闻。**
+> 模型返回的标注结果要与原始条目绑定（`ID` → `display_title` → `title` → `ID 哈希后缀` 四级匹配）。
+> 四级全失败的结果会被**丢弃并告警**，绝不保留——否则会流出一条 source/link/title 全空、
+> 只有模型生成内容的条目，等于凭空发布一条读者无法自查的「新闻」。
+> `BuildDigest` 还会再过滤一次 `Source` 为空的条目作为第二道防线。
+> （该漏洞 2026-09-14、09-15 各发生一次，回归用例见 `pipeline/tag/parse_test.go`。）
+
 #### MergeHistory
 
 加载最近 `max_news_age_days + 1` 天的推送历史（`push_history_YYYYMMDD.jsonl`），四级去重：

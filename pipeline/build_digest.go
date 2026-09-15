@@ -22,10 +22,23 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNews
 	merged := p.dedupAndLinkBatch(ctx, items)
 
 	candidates := make([]types.MergedNewsItem, 0)
+	var noSource int
 	for _, item := range merged {
-		if !item.SeenBefore {
-			candidates = append(candidates, item)
+		if item.SeenBefore {
+			continue
 		}
+		// 兜底：简报里每一条都必须能回溯到一条真实抓取的新闻。上游若漏出
+		// 无来源条目（见 ParseTaggedItems），这里再拦一次——宁可少推一条，
+		// 也不能推一条读者无法自查的内容。
+		if strings.TrimSpace(item.Source) == "" {
+			noSource++
+			log.Printf("[BuildDigest] ⚠ 丢弃无来源条目: display_title=%q link=%q", item.DisplayTitle, item.Link)
+			continue
+		}
+		candidates = append(candidates, item)
+	}
+	if noSource > 0 {
+		log.Printf("[BuildDigest] 本轮丢弃 %d 条无来源条目", noSource)
 	}
 
 	byCategory := make(map[string][]types.MergedNewsItem)

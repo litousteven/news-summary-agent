@@ -290,3 +290,59 @@ func TestBuildDigest_ExcludesRefsFromFinalList(t *testing.T) {
 		t.Errorf("expected second item 新闻C, got %s", digest.Items[1].DisplayTitle)
 	}
 }
+
+// 核心回归：无来源条目不得进入简报。
+//
+// 上游 ParseTaggedItems 曾漏出 source/title/link 全空的条目（见 tag 包的
+// TestParseTaggedItems_DropsUnmatchedResult），这里是第二道防线。即使上游
+// 再漏，简报也必须拦住——宁可少推一条，也不能推一条读者无法自查的内容。
+func TestBuildDigest_DropsItemsWithoutSource(t *testing.T) {
+	items := []types.MergedNewsItem{
+		{
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem: types.RawNewsItem{
+					Link:   "https://example.com/real",
+					Source: "中新网",
+					Title:  "真实新闻",
+				},
+				DisplayTitle:  "真实新闻",
+				Category:      "全球经济",
+				InterestScore: 7,
+			},
+		},
+		{
+			// 复刻事故条目：只有模型生成的 display_title，原始字段全空
+			TaggedNewsItem: types.TaggedNewsItem{
+				DisplayTitle:  "中国车企加快自研电池布局，导致宁德时代股价大幅下跌超过6%",
+				Category:      "全球经济",
+				InterestScore: 10, // 分数比真实新闻更高，确保它不是「因为分低才没入选」
+			},
+		},
+		{
+			// 只有空白字符的来源同样视为无来源
+			TaggedNewsItem: types.TaggedNewsItem{
+				RawNewsItem:   types.RawNewsItem{Source: "   ", Link: "https://example.com/blank"},
+				DisplayTitle:  "来源为空白字符",
+				Category:      "全球经济",
+				InterestScore: 9,
+			},
+		},
+	}
+
+	p := &NewsPipeline{}
+	digest, err := p.buildDigest(context.Background(), items)
+	if err != nil {
+		t.Fatalf("buildDigest error: %v", err)
+	}
+
+	if len(digest.Items) != 1 {
+		t.Fatalf("只应留下 1 条有来源的条目，实际 %d 条", len(digest.Items))
+	}
+	if digest.Items[0].DisplayTitle != "真实新闻" {
+		t.Errorf("应留下「真实新闻」，实际 %q", digest.Items[0].DisplayTitle)
+	}
+	// 统计里的入选数也要跟着降下来，避免下游统计与实际不符
+	if digest.Stats.TotalSelected != 1 {
+		t.Errorf("Stats.TotalSelected = %d，期望 1", digest.Stats.TotalSelected)
+	}
+}
