@@ -25,6 +25,12 @@ file_expiry_days: 2
 # 的条目同时也「还在历史里、能被去重拦住」。
 max_news_age_days: 3
 
+# 中间带去重核查：相似度落在 [dedup_verify_floor, cluster_threshold) 的条目
+# 用一次 LLM 调用批量判断是否同一事件。同一场发布会的多篇稿件相似度常在
+# 0.45–0.60，达不到 cluster_threshold，只靠向量会全部入选。
+dedup_verify_floor: 0.40
+dedup_verify_max_pairs: 30
+
 # RSS 抓取重试：代理抖动/超时等瞬时失败时重试，避免整轮丢掉一个源。
 # 线性退避 = 第 n 次重试等待 n * feed_retry_base_delay_seconds 秒。
 # 4xx 视为永久失败（地址失效/被拒），不重试。

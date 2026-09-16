@@ -62,9 +62,6 @@ func TestLoadTagCache_ValidFile(t *testing.T) {
 	if items[0].Link != "https://example.com/1" {
 		t.Errorf("items[0].Link: got %q, want %q", items[0].Link, "https://example.com/1")
 	}
-	if !items[0].Selected {
-		t.Error("items[0].Selected should be true")
-	}
 
 	if items[1].ID != "test-2" {
 		t.Errorf("items[1].ID: got %q, want %q", items[1].ID, "test-2")
@@ -143,7 +140,6 @@ func TestAppendTagCache_NewFile(t *testing.T) {
 			TopicTags:     []string{"AI"},
 			Region:        "北美",
 			InterestScore: 7,
-			Selected:      true,
 			WhySelected:   "test",
 		},
 	}
@@ -173,7 +169,7 @@ func TestAppendTagCache_AppendToExisting(t *testing.T) {
 	first := []types.TaggedNewsItem{
 		{
 			RawNewsItem:  types.RawNewsItem{ID: "first", Source: "BBC", Title: "First", Summary: "s", Link: "https://x.com/1", PublishedAt: "2025-01-01T00:00:00Z", Lang: "en"},
-			DisplayTitle: "第一", Category: "AI与数码", InterestScore: 5, Selected: true,
+			DisplayTitle: "第一", Category: "AI与数码", InterestScore: 5,
 		},
 	}
 	if err := AppendTagCache(tmpDir, first); err != nil {
@@ -183,7 +179,7 @@ func TestAppendTagCache_AppendToExisting(t *testing.T) {
 	second := []types.TaggedNewsItem{
 		{
 			RawNewsItem:  types.RawNewsItem{ID: "second", Source: "CNN", Title: "Second", Summary: "s", Link: "https://x.com/2", PublishedAt: "2025-01-01T00:00:00Z", Lang: "en"},
-			DisplayTitle: "第二", Category: "战争与地缘", InterestScore: 8, Selected: true,
+			DisplayTitle: "第二", Category: "战争与地缘", InterestScore: 8,
 		},
 	}
 	if err := AppendTagCache(tmpDir, second); err != nil {
@@ -319,14 +315,12 @@ func TestTagNewItems_SingleBatchSuccess(t *testing.T) {
 			DisplayTitle:  "测试标题1",
 			Category:      "AI与数码",
 			InterestScore: 8,
-			Selected:      true,
 		},
 		{
 			RawNewsItem:   types.RawNewsItem{ID: "item-2"},
 			DisplayTitle:  "测试标题2",
 			Category:      "战争与地缘",
 			InterestScore: 9,
-			Selected:      true,
 		},
 	}
 
@@ -366,7 +360,7 @@ func TestTagNewItems_SingleBatchSuccess(t *testing.T) {
 func TestTagNewItems_MultipleBatches(t *testing.T) {
 	var callCnt int32
 	mockResult := []types.TaggedNewsItem{
-		{RawNewsItem: types.RawNewsItem{ID: "a"}, DisplayTitle: "A", Category: "AI与数码", InterestScore: 5, Selected: true},
+		{RawNewsItem: types.RawNewsItem{ID: "a"}, DisplayTitle: "A", Category: "AI与数码", InterestScore: 5},
 	}
 	graph := &mockTagGraph{results: mockResult, callCnt: &callCnt}
 
@@ -413,7 +407,7 @@ func TestTagNewItems_RetryOnFailure(t *testing.T) {
 	failingGraph := &failingMockTagGraph{
 		failCount: 2,
 		successResult: []types.TaggedNewsItem{
-			{RawNewsItem: types.RawNewsItem{ID: "retry-1"}, DisplayTitle: "Retry", Category: "AI与数码", InterestScore: 5, Selected: true},
+			{RawNewsItem: types.RawNewsItem{ID: "retry-1"}, DisplayTitle: "Retry", Category: "AI与数码", InterestScore: 5},
 		},
 		callCnt: &callCnt,
 	}
@@ -530,7 +524,6 @@ func TestParallelTagItems_AllFromCache(t *testing.T) {
 		DisplayTitle:  "缓存标题",
 		Category:      "AI与数码",
 		InterestScore: 8,
-		Selected:      true,
 	}
 	if err := AppendTagCache(tmpDir, []types.TaggedNewsItem{cachedItem}); err != nil {
 		t.Fatalf("AppendTagCache: %v", err)
@@ -589,14 +582,13 @@ func TestParallelTagItems_PartialCache(t *testing.T) {
 		DisplayTitle:  "缓存",
 		Category:      "AI与数码",
 		InterestScore: 5,
-		Selected:      true,
 	}
 	if err := AppendTagCache(tmpDir, []types.TaggedNewsItem{cachedItem}); err != nil {
 		t.Fatalf("AppendTagCache: %v", err)
 	}
 
 	mockResult := []types.TaggedNewsItem{
-		{RawNewsItem: types.RawNewsItem{ID: "new-1"}, DisplayTitle: "新", Category: "战争与地缘", InterestScore: 7, Selected: true},
+		{RawNewsItem: types.RawNewsItem{ID: "new-1"}, DisplayTitle: "新", Category: "战争与地缘", InterestScore: 7},
 	}
 
 	graph := &mockTagGraph{results: mockResult}
@@ -635,8 +627,8 @@ func TestParallelTagItems_AllNew(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	mockResult := []types.TaggedNewsItem{
-		{RawNewsItem: types.RawNewsItem{ID: "new-1"}, DisplayTitle: "新1", Category: "AI与数码", InterestScore: 5, Selected: true},
-		{RawNewsItem: types.RawNewsItem{ID: "new-2"}, DisplayTitle: "新2", Category: "战争与地缘", InterestScore: 6, Selected: true},
+		{RawNewsItem: types.RawNewsItem{ID: "new-1"}, DisplayTitle: "新1", Category: "AI与数码", InterestScore: 5},
+		{RawNewsItem: types.RawNewsItem{ID: "new-2"}, DisplayTitle: "新2", Category: "战争与地缘", InterestScore: 6},
 	}
 
 	graph := &mockTagGraph{results: mockResult}
@@ -726,7 +718,6 @@ func TestParallelTagItems_CacheHitDifferentFromItems(t *testing.T) {
 		DisplayTitle:  "缓存版本",
 		Category:      "AI与数码",
 		InterestScore: 9,
-		Selected:      true,
 	}
 	if err := AppendTagCache(tmpDir, []types.TaggedNewsItem{cachedItem}); err != nil {
 		t.Fatalf("AppendTagCache: %v", err)
@@ -826,8 +817,6 @@ func TestLoadTagCache_RoundTrip(t *testing.T) {
 			TopicTags:     []string{"AI", "测试"},
 			Region:        "北美",
 			InterestScore: 10,
-			IsDuplicate:   false,
-			Selected:      true,
 			WhySelected:   "roundtrip test",
 		},
 	}
@@ -882,12 +871,6 @@ func TestLoadTagCache_RoundTrip(t *testing.T) {
 	if l.InterestScore != 10 {
 		t.Errorf("InterestScore: got %d, want 10", l.InterestScore)
 	}
-	if l.IsDuplicate {
-		t.Error("IsDuplicate should be false")
-	}
-	if !l.Selected {
-		t.Error("Selected should be true")
-	}
 	if l.WhySelected != "roundtrip test" {
 		t.Errorf("WhySelected: got %q, want %q", l.WhySelected, "roundtrip test")
 	}
@@ -920,5 +903,31 @@ func TestLoadTagCache_VersionMismatch(t *testing.T) {
 	}
 	if items[0].ID != "today-1" {
 		t.Errorf("ID: got %q, want %q (should load only today's cache)", items[0].ID, "today-1")
+	}
+}
+
+// 向后兼容：旧缓存的记录里还带着已删除的 is_duplicate / selected 字段，
+// 必须仍能正常加载（encoding/json 忽略未知键），不能让当天缓存整体失效。
+func TestLoadTagCache_ToleratesRemovedFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	today := time.Now().Format("20060102")
+	path := tmpDir + "/tagged_cache_" + today + ".jsonl"
+	legacy := `{"id":"中新网-abc12345","source":"中新网","title":"旧记录","summary":"s",` +
+		`"link":"https://e.com/old","published_at":"2026-09-15T00:00:00Z","lang":"zh",` +
+		`"display_title":"旧记录","category":"AI与数码","topic_tags":["AI"],"region":"中国",` +
+		`"interest_score":8,"is_duplicate":false,"selected":true,"why_selected":"历史字段"}` + "\n"
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("写缓存: %v", err)
+	}
+
+	items, err := LoadTagCache(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadTagCache: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("应加载 1 条，实际 %d 条", len(items))
+	}
+	if items[0].DisplayTitle != "旧记录" || items[0].InterestScore != 8 || items[0].Source != "中新网" {
+		t.Errorf("保留字段应完整: %+v", items[0])
 	}
 }

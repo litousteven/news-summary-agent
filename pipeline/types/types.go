@@ -26,8 +26,6 @@ type TaggedNewsItem struct {
 	TopicTags     []string `json:"topic_tags"`
 	Region        string   `json:"region"`
 	InterestScore int      `json:"interest_score"`
-	IsDuplicate   bool     `json:"is_duplicate"`
-	Selected      bool     `json:"selected"`
 	WhySelected   string   `json:"why_selected"`
 }
 
@@ -218,6 +216,12 @@ const (
 	// stop updating keep serving their last batch, so without this bound the
 	// pipeline re-tags and re-pushes the same dead batch indefinitely.
 	DefaultMaxNewsAgeDays = 3
+
+	// 中间带去重核查：相似度落在 [floor, cluster_threshold) 的条目交给 LLM
+	// 判断是否同一事件。0.40 来自实测——同一场发布会的不同稿件相似度约
+	// 0.45–0.60，而真正无关的条目普遍低于 0.40。
+	DefaultDedupVerifyFloor    = 0.40
+	DefaultDedupVerifyMaxPairs = 30
 
 	// RSS 抓取重试：瞬时失败（代理抖动、超时、5xx）重试次数与线性退避基数。
 	// 抓取原本一次性，代理 reset 一次就整轮丢掉一个源。

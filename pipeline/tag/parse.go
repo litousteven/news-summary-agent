@@ -219,8 +219,6 @@ func ParseTaggedItems(msgContent string, rawItems []types.RawNewsItem, validCate
 			TopicTags:     ParseTopicTags(r.TopicTags),
 			Region:        r.Region,
 			InterestScore: ParseInterestScore(r.InterestScore),
-			IsDuplicate:   ParseBool(r.IsDuplicate, false),
-			Selected:      ParseBool(r.Selected, false),
 			WhySelected:   r.WhySelected,
 		}
 

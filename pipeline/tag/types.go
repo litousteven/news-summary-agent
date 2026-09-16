@@ -13,8 +13,6 @@ type TagResultItem struct {
 	TopicTags     json.RawMessage `json:"topic_tags"`
 	Region        string          `json:"region"`
 	InterestScore json.RawMessage `json:"interest_score"`
-	IsDuplicate   json.RawMessage `json:"is_duplicate"`
-	Selected      json.RawMessage `json:"selected"`
 	WhySelected   string          `json:"why_selected"`
 }
 

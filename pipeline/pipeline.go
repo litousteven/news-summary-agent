@@ -45,6 +45,11 @@ type PipelineConfig struct {
 	// 旧闻，没有这道闸门它们会被反复标注、反复推送。
 	MaxNewsAgeDays int `yaml:"max_news_age_days"`
 
+	// 中间带去重核查：相似度落在 [floor, cluster_threshold) 的条目交给 LLM
+	// 判断是否同一事件。0 表示关闭该路径。
+	DedupVerifyFloor    float64 `yaml:"dedup_verify_floor"`
+	DedupVerifyMaxPairs int     `yaml:"dedup_verify_max_pairs"`
+
 	// RSS 抓取重试（代理抖动、超时等瞬时失败）
 	FeedMaxRetries            int `yaml:"feed_max_retries"`
 	FeedRetryBaseDelaySeconds int `yaml:"feed_retry_base_delay_seconds"`
@@ -145,6 +150,25 @@ func (p *NewsPipeline) GetMaxNewsAgeDays() int {
 // visible in history, otherwise it falls out of dedup and gets pushed again.
 func (p *NewsPipeline) GetHistoryWindowDays() int {
 	return p.GetMaxNewsAgeDays() + 1
+}
+
+// GetDedupVerifyFloor 是中间带核查的相似度下限。低于它的对子不予考虑。
+func (p *NewsPipeline) GetDedupVerifyFloor() float64 {
+	if p.Config.DedupVerifyFloor < 0 {
+		return 0
+	}
+	if p.Config.DedupVerifyFloor == 0 {
+		return types.DefaultDedupVerifyFloor
+	}
+	return p.Config.DedupVerifyFloor
+}
+
+// GetDedupVerifyMaxPairs 限制单次提示词里核查的对数，控制成本与提示词长度。
+func (p *NewsPipeline) GetDedupVerifyMaxPairs() int {
+	if p.Config.DedupVerifyMaxPairs <= 0 {
+		return types.DefaultDedupVerifyMaxPairs
+	}
+	return p.Config.DedupVerifyMaxPairs
 }
 
 func (p *NewsPipeline) GetFeedMaxRetries() int {
