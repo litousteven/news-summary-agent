@@ -42,8 +42,8 @@ cp .env.example .env
 **2. 运行参数** — 编辑 `config/config.yaml`
 
 ```yaml
-max_items_per_feed: 10    # 每个 RSS 源最大抓取条目数
-max_total_items: 50       # 总共最大抓取条目数
+max_items_per_feed: 16    # 每个 RSS 源最大抓取条目数
+max_total_items: 180      # 总共最大抓取条目数（166 < 180，当前不构成约束）
 max_digest_items: 10      # 简报最大入选条目数
 max_per_category: 3       # 每个分类最大条目数
 cluster_threshold: 0.75   # 语义去重相似度阈值 (0.0~1.0)
@@ -252,7 +252,9 @@ END → *NewsSummaryResult
 
 #### FetchRSS
 
-从 `config/feeds.yaml` 加载 RSS 源，逐源抓取并解析。每个源最多取 `max_items_per_feed` 条，总计不超过 `max_total_items` 条。需要代理的源根据 `use_proxy` 配置自动走 `PROXY_ADDR`。
+从 `config/feeds.yaml` 加载 RSS 源，按质量档位排序后逐源抓取并解析。每个源最多取
+`max_items_per_feed` 条，总计不超过 `max_total_items` 条（先到先得，所以顺序有意义）。
+需要代理的源根据 `use_proxy` 配置自动走 `PROXY_ADDR`；瞬时失败会退避重试，4xx 不重试。
 
 #### ParallelTag
 
