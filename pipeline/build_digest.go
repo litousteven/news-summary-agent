@@ -95,6 +95,20 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNews
 		}
 	}
 
+	// 选稿后做一次「同一事件」核查：同一场发布会/同一份报告产出的多篇稿件
+	// 标题各异、向量相似度只有 0.4–0.6，够不着阈值，只靠向量会全部入选。
+	// 这里只在个位数的入选条目间核查，成本是一次 LLM 调用。
+	if len(digestItems) > 1 {
+		merged := make([]types.MergedNewsItem, len(digestItems))
+		for i := range digestItems {
+			merged[i] = digestItems[i].MergedNewsItem
+		}
+		p.VerifySelectedNearDuplicates(ctx, merged)
+		for i := range digestItems {
+			digestItems[i].MergedNewsItem = merged[i]
+		}
+	}
+
 	// Second pass: remove items that are now referenced by higher-priority selected items
 	finalItems := make([]types.DigestItem, 0, len(digestItems))
 	referencedLinks := make(map[string]bool)

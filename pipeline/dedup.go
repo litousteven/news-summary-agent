@@ -140,15 +140,13 @@ func linkDuplicate(items []types.MergedNewsItem, i, j int, sim float64) {
 	})
 }
 
-// FindSimilarItems 找出同一事件的不同报道，并让高优先级的一方引用另一方，
-// 交由编排的第二遍去重。两种判定路径：
+// FindSimilarItems 把相似度达到阈值的条目判为同一事件，让高优先级的一方
+// 引用另一方，交由编排的第二遍去重。
 //
-//	相似度 ≥ cluster_threshold       直接认定（同一事件的不同措辞）
-//	相似度 ∈ [verify_floor, 阈值)    批量交给 LLM 判断是否同一事件
-//
-// 之所以需要第二条路径：同一场发布会/同一份报告会产出多篇稿件，各自讲一个
-// 侧面（一个讲数据、一个讲表态），标题差异大，向量相似度可能只有 0.4–0.6，
-// 达不到阈值。2026-09-16 那期就有两组这样的稿件同时入选，占了一整期的一半。
+// 这一层只看阈值以上的对子，是纯计算的；阈值以下、"像但不是"的中间带交给
+// VerifySelectedNearDuplicates 在选稿后核查——在那里候选只有个位数，
+// 而在选稿前对全部条目两两比对会产生数百对（2026-09-16 实测 386 对），
+// 提示词过大直接导致模型超时。
 func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []types.MergedNewsItem) {
 	if p.Embedding == nil || len(items) <= 1 {
 		return
@@ -164,21 +162,57 @@ func FindSimilarItems(ctx context.Context, p *NewsPipeline, items []types.Merged
 	}
 
 	threshold := p.GetClusterThreshold()
-	floor := p.GetDedupVerifyFloor()
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			if sim := embedding.CosineSimilarity(vecs[i], vecs[j]); sim >= threshold && sim < 1.0 {
+				linkDuplicate(items, i, j, sim)
+			}
+		}
+	}
+}
 
+// VerifySelectedNearDuplicates 对**已入选**的简报条目做一次「同一事件」核查。
+//
+// 为什么需要它：同一场发布会 / 同一份报告会产出多篇稿件，各讲一个侧面
+// （一篇讲数据、一篇讲表态），标题差异大，向量相似度只有 0.4–0.6，够不着
+// cluster_threshold，只靠向量会全部入选。2026-09-16 那期就有两组这样的稿件
+// 同时入选，占了整期的一半。
+//
+// 放在选稿之后是因为候选规模：入选条目不超过 max_digest_items（默认 10），
+// 两两比对至多 45 对、落进中间带通常个位数，一次 LLM 调用即可；而在选稿前
+// 对全部条目比对会产生数百对，提示词过大、模型直接超时。
+//
+// 判为同一事件的对子挂上单向引用，随后由 recordHistory 之前的第二遍移除
+// 低优先级的一方。
+func (p *NewsPipeline) VerifySelectedNearDuplicates(ctx context.Context, items []types.MergedNewsItem) {
+	if p.Embedding == nil || p.ChatModel == nil || len(items) <= 1 {
+		return
+	}
+	floor := p.GetDedupVerifyFloor()
+	if floor <= 0 {
+		return
+	}
+
+	texts := make([]string, len(items))
+	for i, item := range items {
+		texts[i] = item.DisplayTitle + " " + item.Summary
+	}
+	vecs, err := embedding.CachedEmbedStrings(ctx, p.EmbedCache, p.Embedding, texts)
+	if err != nil || len(vecs) != len(items) {
+		log.Printf("[Dedup] 入选条目向量计算失败，跳过中间带核查: %v", err)
+		return
+	}
+
+	threshold := p.GetClusterThreshold()
 	var midBand []candidatePair
 	for i := 0; i < len(items); i++ {
 		for j := i + 1; j < len(items); j++ {
 			sim := embedding.CosineSimilarity(vecs[i], vecs[j])
-			switch {
-			case sim >= threshold && sim < 1.0:
-				linkDuplicate(items, i, j, sim)
-			case floor > 0 && sim >= floor && sim < threshold:
+			if sim >= floor && sim < threshold {
 				midBand = append(midBand, candidatePair{i: i, j: j, sim: sim})
 			}
 		}
 	}
-
 	if len(midBand) == 0 {
 		return
 	}
@@ -214,13 +248,16 @@ func (p *NewsPipeline) verifyMidBandDuplicates(ctx context.Context, items []type
 
 	confirmed := 0
 	for k, pair := range pairs {
-		if !verdicts[k] {
-			continue
+		verdict := "不同事件"
+		if verdicts[k] {
+			verdict = "同一事件"
+			linkDuplicate(items, pair.i, pair.j, pair.sim)
+			confirmed++
 		}
-		linkDuplicate(items, pair.i, pair.j, pair.sim)
-		confirmed++
-		log.Printf("[Dedup] 判定同一事件（相似度 %.3f）: %q ↔ %q",
-			pair.sim, items[pair.i].DisplayTitle, items[pair.j].DisplayTitle)
+		// 逐对记录判定结果：漏判和误判都只能从这里看出来
+		log.Printf("[Dedup] 候选[%d/%d] %s（相似度 %.3f）: %q ↔ %q",
+			k+1, len(pairs), verdict, pair.sim,
+			items[pair.i].DisplayTitle, items[pair.j].DisplayTitle)
 	}
 	log.Printf("[Dedup] 中间带核查: %d 对候选（阈值 %.2f–%.2f），%d 对判定为同一事件",
 		len(pairs), p.GetDedupVerifyFloor(), p.GetClusterThreshold(), confirmed)
