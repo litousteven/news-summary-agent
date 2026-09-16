@@ -375,3 +375,114 @@ func TestBuildDigest_DropsItemsWithoutSource(t *testing.T) {
 		t.Errorf("Stats.TotalSelected = %d，期望 1", digest.Stats.TotalSelected)
 	}
 }
+
+// 构造一条带分类与分数的候选。
+func cand(category, link string, score int) types.MergedNewsItem {
+	return types.MergedNewsItem{
+		TaggedNewsItem: types.TaggedNewsItem{
+			RawNewsItem:   types.RawNewsItem{Source: "中新网", Link: link, Title: link},
+			DisplayTitle:  link,
+			Category:      category,
+			InterestScore: score,
+		},
+	}
+}
+
+// 核心回归：预算由分数决定，不由 CategoryOrder 的顺序决定。
+//
+// 原实现按 CategoryOrder 逐类填满，排在前面的分类即使最高分只有 6，也会先
+// 吃光 max_digest_items，导致后面分类里 10 分的稿子进不来。2026-09-16 18:14
+// 那期就是这样：全部 10 条来自单一来源，平均分 4.9，而场外有 47 条 ≥8 分。
+func TestBuildDigest_HighScoreCategoryGetsBudgetFirst(t *testing.T) {
+	var items []types.MergedNewsItem
+	// 排在 CategoryOrder 最前的分类，但分数低
+	for i := 0; i < 5; i++ {
+		items = append(items, cand("战争与地缘", "https://e.com/low"+string(rune('a'+i)), 6))
+	}
+	// 排在最后（其他重要动态）但分数高
+	items = append(items, cand("其他重要动态", "https://e.com/high", 10))
+
+	p := &NewsPipeline{Config: PipelineConfig{MaxDigestItems: 1, MaxPerCategory: 5}}
+	digest, err := p.buildDigest(context.Background(), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(digest.Items) != 1 {
+		t.Fatalf("应入选 1 条，实际 %d 条", len(digest.Items))
+	}
+	if digest.Items[0].Link != "https://e.com/high" {
+		t.Errorf("应让 10 分的「其他重要动态」先拿预算，实际入选 %q（分数 %d）",
+			digest.Items[0].Link, digest.Items[0].InterestScore)
+	}
+}
+
+// 轮转保证广度：名额等于分类数时，每个分类各出 1 条，而不是被首类包揽。
+func TestBuildDigest_RoundRobinGivesEachCategoryASlot(t *testing.T) {
+	items := []types.MergedNewsItem{
+		cand("战争与地缘", "https://e.com/a1", 9),
+		cand("战争与地缘", "https://e.com/a2", 8),
+		cand("战争与地缘", "https://e.com/a3", 7),
+		cand("AI与数码", "https://e.com/b1", 8),
+		cand("AI与数码", "https://e.com/b2", 7),
+		cand("AI与数码", "https://e.com/b3", 6),
+		cand("全球经济", "https://e.com/c1", 7),
+		cand("全球经济", "https://e.com/c2", 6),
+		cand("全球经济", "https://e.com/c3", 5),
+	}
+
+	p := &NewsPipeline{Config: PipelineConfig{MaxDigestItems: 3, MaxPerCategory: 5}}
+	digest, err := p.buildDigest(context.Background(), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(digest.Items) != 3 {
+		t.Fatalf("应入选 3 条，实际 %d 条", len(digest.Items))
+	}
+	seen := map[string]int{}
+	for _, it := range digest.Items {
+		seen[it.Category]++
+	}
+	for _, cat := range []string{"战争与地缘", "AI与数码", "全球经济"} {
+		if seen[cat] != 1 {
+			t.Errorf("分类 %q 应恰好入选 1 条，实际 %d 条（seen=%v）", cat, seen[cat], seen)
+		}
+	}
+}
+
+// max_per_category 仍然生效：单个分类不能靠轮转无限扩张。
+func TestBuildDigest_RespectsPerCategoryCap(t *testing.T) {
+	var items []types.MergedNewsItem
+	for i := 0; i < 6; i++ {
+		items = append(items, cand("战争与地缘", "https://e.com/x"+string(rune('a'+i)), 9))
+	}
+
+	p := &NewsPipeline{Config: PipelineConfig{MaxDigestItems: 10, MaxPerCategory: 2}}
+	digest, err := p.buildDigest(context.Background(), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(digest.Items) != 2 {
+		t.Errorf("每类上限 2 时应入选 2 条，实际 %d 条", len(digest.Items))
+	}
+}
+
+// 分数相同时，CategoryOrder 的位置决定轮转先后（配置里的偏好仍生效）。
+func TestBuildDigest_CategoryOrderBreaksScoreTie(t *testing.T) {
+	items := []types.MergedNewsItem{
+		// 军事装备在 CategoryOrder 中比 AI与数码 靠前
+		cand("AI与数码", "https://e.com/ai", 7),
+		cand("军事装备", "https://e.com/mil", 7),
+	}
+
+	p := &NewsPipeline{Config: PipelineConfig{MaxDigestItems: 1, MaxPerCategory: 5}}
+	digest, err := p.buildDigest(context.Background(), items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(digest.Items) != 1 {
+		t.Fatalf("应入选 1 条，实际 %d 条", len(digest.Items))
+	}
+	if digest.Items[0].Category != "军事装备" {
+		t.Errorf("同分时应用 CategoryOrder 决胜，期望「军事装备」，实际 %q", digest.Items[0].Category)
+	}
+}

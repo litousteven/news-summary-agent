@@ -62,22 +62,57 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNews
 		})
 	}
 
-	// First pass: select candidates per category
+	// 轮转顺序：按「本类最高分」降序。分数决定预算分配，而不是 CategoryOrder
+	// 的顺序——原先按配置顺序逐类填满，排在前面的分类（往往是只有单一来源能供
+	// 的国内分类）会把 max_digest_items 全部吃光，即使它们的最高分只有 6，
+	// 而排在后面的分类里有 10 分的稿子也进不来。
+	// 同分时用 CategoryOrder 的位置决胜，让配置里的偏好仍然生效。
+	catOrder := make([]string, 0, len(byCategory))
+	for cat := range byCategory {
+		catOrder = append(catOrder, cat)
+	}
+	orderIndex := make(map[string]int, len(types.CategoryOrder))
+	for i, c := range types.CategoryOrder {
+		orderIndex[c] = i
+	}
+	sort.SliceStable(catOrder, func(i, j int) bool {
+		bi := byCategory[catOrder[i]][0].InterestScore
+		bj := byCategory[catOrder[j]][0].InterestScore
+		if bi != bj {
+			return bi > bj
+		}
+		ii, iok := orderIndex[catOrder[i]]
+		ij, jok := orderIndex[catOrder[j]]
+		if iok != jok {
+			return iok // 配置里列出的分类优先于未列出的
+		}
+		if iok && jok && ii != ij {
+			return ii < ij
+		}
+		return catOrder[i] < catOrder[j]
+	})
+
+	// 轮转选稿：第 1 轮每个分类各出本类最高分，第 2 轮再各出次高分……
+	// 既保住「每个分类都有代表」的初衷，又让分数决定谁先拿到名额。
+	maxPerCategory := p.GetMaxPerCategory()
+	maxDigestItems := p.GetMaxDigestItems()
 	selectedLinks := make(map[string]bool)
 	var digestItems []types.DigestItem
 	catCount := make(map[string]int)
-	for _, cat := range types.CategoryOrder {
-		items, ok := byCategory[cat]
-		if !ok {
-			continue
-		}
-		for _, item := range items {
-			if catCount[cat] >= p.GetMaxPerCategory() {
+	for round := 0; len(digestItems) < maxDigestItems; round++ {
+		progressed := false
+		for _, cat := range catOrder {
+			if len(digestItems) >= maxDigestItems {
 				break
 			}
-			if len(digestItems) >= p.GetMaxDigestItems() {
-				break
+			if catCount[cat] >= maxPerCategory {
+				continue
 			}
+			items := byCategory[cat]
+			if round >= len(items) {
+				continue
+			}
+			item := items[round]
 			if selectedLinks[item.Link] {
 				continue
 			}
@@ -89,11 +124,15 @@ func (p *NewsPipeline) buildDigest(ctx context.Context, items []types.MergedNews
 			})
 			catCount[cat]++
 			selectedLinks[item.Link] = true
+			progressed = true
 		}
-		if len(digestItems) >= p.GetMaxDigestItems() {
+		// 所有分类都已取空或触顶，再轮转也不会有新增
+		if !progressed {
 			break
 		}
 	}
+	log.Printf("[BuildDigest] 轮转选稿: %d 个候选分类，入选 %d 条（上限 %d，每类上限 %d）",
+		len(catOrder), len(digestItems), maxDigestItems, maxPerCategory)
 
 	// 选稿后做一次「同一事件」核查：同一场发布会/同一份报告产出的多篇稿件
 	// 标题各异、向量相似度只有 0.4–0.6，够不着阈值，只靠向量会全部入选。
